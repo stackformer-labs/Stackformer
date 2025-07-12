@@ -319,61 +319,77 @@ class Multi_latent_Attention(nn.Module):
         out = self.dropout(out)
         return out
 
----
+def precompute_theta_position_frequency(head_dim, seq_len, device='cpu', theta=10000.0):
+    assert head_dim % 2 == 0, "head_dim must be even"
 
-def precompute_theta_position_frequency(head_dim, seq_len, theta=10000.0):
-    assert head_dim % 2 == 0
-    theta_numerator = torch.arange(0, head_dim, 2).float()
+    # Frequencies: 1 / (theta ** (2i / head_dim))
+    theta_numerator = torch.arange(0, head_dim, 2, device=device)
     inv_freq = 1.0 / (theta ** (theta_numerator / head_dim))
-    m = torch.arange(seq_len)
-    freqs = torch.outer(m, inv_freq).float()
+
+    # Position indices
+    m = torch.arange(seq_len, device=device)
+
+    # Outer product: (seq_len, head_dim // 2)
+    freqs = torch.outer(m, inv_freq)
+
+    # Convert to complex exponential form: exp(i * freq)
     freq_complex = torch.polar(torch.ones_like(freqs), freqs)
     return freq_complex
 
-def apply_rotry_position_embedding(x, freq_complex):
-    batch_size, seq_len, num_head, emb_dim = x.shape
 
-    x_reshaped = x.view(batch_size, seq_len, num_head, emb_dim // 2, 2)
+def apply_rotry_position_embedding(x, freq_complex, device='cpu', dtype=torch.float32):
+    # x: (batch_size, seq_len, num_head, emb_dim)
+    batch_size, seq_len, num_head, emb_dim = x.shape
+    assert emb_dim % 2 == 0, "emb_dim must be even"
+
+    # Reshape to split last dimension into complex pairs
+    x_reshaped = x.view(batch_size, seq_len, num_head, emb_dim // 2, 2).to(device=device, dtype=dtype)
     x_complex = torch.view_as_complex(x_reshaped)
 
-    freq_complex = freq_complex[:seq_len].unsqueeze(0).unsqueeze(2)  # (1, seq_len, 1, emb_dim/2)
+    # Prepare frequencies: (1, seq_len, 1, emb_dim//2)
+    freq_complex = freq_complex[:seq_len].unsqueeze(0).unsqueeze(2).to(device=device)
+
+    # Apply rotation
     x_rotated = x_complex * freq_complex
 
+    # Convert back to real tensor and reshape
     x_out = torch.view_as_real(x_rotated).contiguous().view(batch_size, seq_len, num_head, emb_dim)
-    return x_out.type_as(x)
+    return x_out.to(device=device, dtype=dtype)
 
 class kv_cache_multihead(nn.Module):
-    def __init__(self, emb_dim, num_heads, batch_size, kv_seq_len, dtype=torch.float32,dropout=0.1):
-        super().__init__()
+    def __init__(self, emb_dim, num_heads, batch_size, kv_seq_len, device='cpu', dtype=torch.float32,dropout=0.1):
+        super().__init__()        
+        self.dtype = dtype
+        self.device = device
+        
         assert emb_dim % num_heads == 0
-        self.dtype=dtype
         self.emb_dim = emb_dim
         self.num_heads = num_heads
         self.head_dim = emb_dim // num_heads
         self.kv_seq_len = kv_seq_len
 
-        self.query = nn.Linear(emb_dim, emb_dim, bias=False,dtype=dtype)
-        self.key = nn.Linear(emb_dim, emb_dim, bias=False,dtype=dtype)
-        self.value = nn.Linear(emb_dim, emb_dim, bias=False,dtype=dtype)
+        self.query = nn.Linear(emb_dim, emb_dim, bias=False).to(device,dtype)
+        self.key = nn.Linear(emb_dim, emb_dim, bias=False).to(device,dtype)
+        self.value = nn.Linear(emb_dim, emb_dim, bias=False).to(device,dtype)
         
-        self.out_proj = nn.Linear(emb_dim, emb_dim,dtype=dtype)
+        self.out_proj = nn.Linear(emb_dim, emb_dim).to(device,dtype)
         self.dropout = nn.Dropout(dropout)
 
-        self.cache_keys = torch.zeros(batch_size, kv_seq_len, num_heads, self.head_dim,dtype=dtype)
-        self.cache_value = torch.zeros(batch_size, kv_seq_len, num_heads, self.head_dim,dtype=dtype)
+        self.cache_keys = torch.zeros(batch_size, kv_seq_len, num_heads, self.head_dim).to(device,dtype)
+        self.cache_value = torch.zeros(batch_size, kv_seq_len, num_heads, self.head_dim).to(device,dtype)
 
     def forward(self, x, start_pos, RoPE: False):
         batch_size, seq_len, C = x.shape
-        x = x.to(self.dtype)
         
         xq = self.query(x).view(batch_size, seq_len, self.num_heads, self.head_dim)
         xk = self.key(x).view(batch_size, seq_len, self.num_heads, self.head_dim)
         xv = self.value(x).view(batch_size, seq_len, self.num_heads, self.head_dim)
         
         if RoPE:
-            freq_complex = precompute_theta_position_frequency(head_dim=self.head_dim, seq_len=self.kv_seq_len)
-            xq = apply_rotry_position_embedding(xq, freq_complex)
-            xk = apply_rotry_position_embedding(xk, freq_complex)
+            freq_complex = precompute_theta_position_frequency(head_dim=self.head_dim, seq_len=seq_len, device=self.device)
+            xq = apply_rotry_position_embedding(xq, freq_complex, device=self.device, dtype=self.dtype)
+            freq_complex = precompute_theta_position_frequency(head_dim=self.head_dim, seq_len=self.kv_seq_len, device=self.device)
+            xk = apply_rotry_position_embedding(xk, freq_complex, device=self.device, dtype=self.dtype)
         
         # Cache keys and values
         self.cache_keys[:, start_pos:start_pos+seq_len] = xk
@@ -385,7 +401,7 @@ class kv_cache_multihead(nn.Module):
         query = xq.transpose(1, 2)         # (batch_size, num_head, seq_len, emb_dim)
         key = xk_full.transpose(1, 2)    # (batch_size, num_head, T_total, emb_dim)
         value = xv_full.transpose(1, 2)    # (batch_size, num_head, T_total, emb_dim)
-        query = query.to(self.dtype)
+                
         attn_scores = torch.matmul(query, key.transpose(2, 3)) / (self.head_dim ** 0.5)
         attn_weights = F.softmax(attn_scores, dim=-1)
         out = torch.matmul(attn_weights, value)
@@ -394,11 +410,13 @@ class kv_cache_multihead(nn.Module):
         return self.dropout(self.out_proj(out))
 
 class kv_cache_group_query(nn.Module):
-    def __init__(self, emb_dim, query_num_heads, kv_num_heads, batch_size, kv_seq_len, dtype=torch.float32 , dropout=0.1):
+    def __init__(self, emb_dim, query_num_heads, kv_num_heads, batch_size, kv_seq_len,device='cpu' , dtype=torch.float32 , dropout=0.1):
         super().__init__()
+        self.dtype = dtype
+        self.device = device
+        
         assert query_num_heads % kv_num_heads == 0, "query heads must be divisible by kv heads"
         assert emb_dim % query_num_heads == 0, "embedding must be divisible by query heads"
-        self.dtype=dtype
 
         self.emb_dim = emb_dim
         self.query_num_heads = query_num_heads
@@ -407,30 +425,29 @@ class kv_cache_group_query(nn.Module):
         self.num_queries_per_kv = query_num_heads // kv_num_heads
         self.kv_seq_len = kv_seq_len
 
-        self.query = nn.Linear(emb_dim, emb_dim, bias=False,dtype=dtype)
-        self.key = nn.Linear(emb_dim, kv_num_heads * self.head_dim, bias=False,dtype=dtype)
-        self.value = nn.Linear(emb_dim, kv_num_heads * self.head_dim, bias=False,dtype=dtype)
+        self.query = nn.Linear(emb_dim, emb_dim, bias=False).to(device,dtype)
+        self.key = nn.Linear(emb_dim, kv_num_heads * self.head_dim, bias=False).to(device,dtype)
+        self.value = nn.Linear(emb_dim, kv_num_heads * self.head_dim, bias=False).to(device,dtype)
 
-        self.out_proj = nn.Linear(emb_dim, emb_dim,dtype=dtype)
+        self.out_proj = nn.Linear(emb_dim, emb_dim).to(device,dtype)
         self.dropout = nn.Dropout(dropout)
 
         # KV caches
-        self.register_buffer("cache_keys", torch.zeros(batch_size, kv_seq_len, kv_num_heads, self.head_dim,dtype=dtype))
-        self.register_buffer("cache_value", torch.zeros(batch_size, kv_seq_len, kv_num_heads, self.head_dim,dtype=dtype))
+        self.register_buffer("cache_keys", torch.zeros(batch_size, kv_seq_len, kv_num_heads, self.head_dim,device=device,dtype=dtype))
+        self.register_buffer("cache_value", torch.zeros(batch_size, kv_seq_len, kv_num_heads, self.head_dim,device=device,dtype=dtype))
         
     def forward(self, x, start_pos, RoPE=False):
         batch_size, seq_len, _ = x.shape
-        x = x.to(self.dtype)
 
         xq = self.query(x).view(batch_size, seq_len, self.query_num_heads, self.head_dim)
         xk = self.key(x).view(batch_size, seq_len, self.kv_num_heads, self.head_dim)
         xv = self.value(x).view(batch_size, seq_len, self.kv_num_heads, self.head_dim)
 
         if RoPE:
-            freq_q = precompute_theta_position_frequency(head_dim=self.head_dim, seq_len=seq_len)
-            xq = apply_rotry_position_embedding(xq, freq_q)
-            freq_k = precompute_theta_position_frequency(head_dim=self.head_dim, seq_len=self.kv_seq_len)
-            xk = apply_rotry_position_embedding(xk, freq_k)
+            freq_q = precompute_theta_position_frequency(head_dim=self.head_dim, seq_len=seq_len, device=self.device)
+            xq = apply_rotry_position_embedding(xq, freq_q, device=self.device, dtype=self.dtype)
+            freq_k = precompute_theta_position_frequency(head_dim=self.head_dim, seq_len=self.kv_seq_len, device=self.device)
+            xk = apply_rotry_position_embedding(xk, freq_k, device=self.device, dtype=self.dtype)
         # Cache
         self.cache_keys[:, start_pos:start_pos+seq_len] = xk
         self.cache_value[:, start_pos:start_pos+seq_len] = xv
@@ -442,9 +459,7 @@ class kv_cache_group_query(nn.Module):
         query = xq.transpose(1, 2)  # [B, q_heads, seq_len, D]
         key = xk_full.transpose(1, 2)  # [B, kv_heads, total_kv_len, D]
         value = xv_full.transpose(1, 2)
-        query=query.to(self.dtype)
-        key=key.to(self.dtype)
-        value=value.to(self.dtype)
+        
         # Repeat keys and values to match query heads
         key = key.repeat_interleave(self.num_queries_per_kv, dim=1)
         value = value.repeat_interleave(self.num_queries_per_kv, dim=1)
