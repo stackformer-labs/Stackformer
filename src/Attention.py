@@ -7,11 +7,11 @@ class Self_Attention(nn.Module):
         super().__init__()
         self.scale = torch.tensor(Emb_dim ** 0.5,dtype=dtype,device=device)
         
-        self.key = nn.Linear(Emb_dim, Emb_dim, bias=False).to(device,dtype)
-        self.query = nn.Linear(Emb_dim, Emb_dim, bias=False).to(device,dtype)
-        self.value = nn.Linear(Emb_dim, Emb_dim, bias=False).to(device,dtype)
+        self.key = nn.Linear(Emb_dim, Emb_dim, bias=False,dtype=dtype,device=device)
+        self.query = nn.Linear(Emb_dim, Emb_dim, bias=False,dtype=dtype,device=device)
+        self.value = nn.Linear(Emb_dim, Emb_dim, bias=False,dtype=dtype,device=device)
 
-        self.out_proj = nn.Linear(Emb_dim, Emb_dim).to(device,dtype)
+        self.out_proj = nn.Linear(Emb_dim, Emb_dim,dtype=dtype,device=device)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, mask: bool = True):
@@ -42,12 +42,12 @@ class Multi_Head_Attention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = Emb_dim // num_heads
 
-        self.key = nn.Linear(Emb_dim, Emb_dim, bias=False).to(device,dtype)
-        self.query = nn.Linear(Emb_dim, Emb_dim, bias=False).to(device,dtype)
-        self.value = nn.Linear(Emb_dim, Emb_dim, bias=False).to(device,dtype)
+        self.key = nn.Linear(Emb_dim, Emb_dim, bias=False,dtype=dtype,device=device)
+        self.query = nn.Linear(Emb_dim, Emb_dim, bias=False,dtype=dtype,device=device)
+        self.value = nn.Linear(Emb_dim, Emb_dim, bias=False,dtype=dtype,device=device)
         
         self.scale = torch.tensor(self.head_dim ** 0.5,device=device,dtype=dtype)
-        self.out_proj = nn.Linear(Emb_dim, Emb_dim).to(device,dtype)
+        self.out_proj = nn.Linear(Emb_dim, Emb_dim,dtype=dtype,device=device)
         
         self.dropout = nn.Dropout(dropout)
 
@@ -88,13 +88,13 @@ class Cross_MultiHead_Attention(nn.Module):
         self.head_dim = Emb_dim // num_heads
 
         # Querys, Key, Value projections
-        self.query = nn.Linear(Emb_dim, Emb_dim, bias=False).to(device,dtype)
-        self.key = nn.Linear(Emb_dim, Emb_dim, bias=False).to(device,dtype)
-        self.value = nn.Linear(Emb_dim, Emb_dim, bias=False).to(device,dtype)
+        self.query = nn.Linear(Emb_dim, Emb_dim, bias=False,dtype=dtype,device=device)
+        self.key = nn.Linear(Emb_dim, Emb_dim, bias=False,dtype=dtype,device=device)
+        self.value = nn.Linear(Emb_dim, Emb_dim, bias=False,dtype=dtype,device=device)
 
         self.scale = torch.tensor(self.head_dim ** 0.5,device=device,dtype=dtype)
 
-        self.out_proj = nn.Linear(Emb_dim, Emb_dim).to(device,dtype)
+        self.out_proj = nn.Linear(Emb_dim, Emb_dim,dtype=dtype,device=device)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, context=None, mask=None):
@@ -135,13 +135,13 @@ class Multi_query_Attention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = Emb_dim // num_heads
 
-        self.query = nn.Linear(Emb_dim, Emb_dim, bias=False).to(device,dtype)
-        self.key = nn.Linear(Emb_dim, self.head_dim, bias=False).to(device,dtype)
-        self.value = nn.Linear(Emb_dim, self.head_dim, bias=False).to(device,dtype)
+        self.query = nn.Linear(Emb_dim, Emb_dim, bias=False,dtype=dtype,device=device)
+        self.key = nn.Linear(Emb_dim, self.head_dim, bias=False,dtype=dtype,device=device)
+        self.value = nn.Linear(Emb_dim, self.head_dim, bias=False,dtype=dtype,device=device)
         
         self.scale = torch.tensor(self.head_dim ** 0.5,device=device,dtype=dtype)
         
-        self.out_proj = nn.Linear(Emb_dim, Emb_dim).to(device,dtype)
+        self.out_proj = nn.Linear(Emb_dim, Emb_dim,dtype=dtype,device=device)
         
         self.dropout = nn.Dropout(dropout)
 
@@ -186,13 +186,13 @@ class Group_query_Attention(nn.Module):
         self.head_dim = Emb_dim // num_query_heads
         self.num_queries_pre_kv = num_query_heads // num_kv_heads
 
-        self.query = nn.Linear(Emb_dim, Emb_dim, bias=False).to(device,dtype)
-        self.key = nn.Linear(Emb_dim, self. num_kv_heads * self.head_dim, bias=False).to(device,dtype)
-        self.value = nn.Linear(Emb_dim, self.num_kv_heads * self.head_dim, bias=False).to(device,dtype)
+        self.query = nn.Linear(Emb_dim, Emb_dim, bias=False,dtype=dtype,device=device)
+        self.key = nn.Linear(Emb_dim, self. num_kv_heads * self.head_dim, bias=False,dtype=dtype,device=device)
+        self.value = nn.Linear(Emb_dim, self.num_kv_heads * self.head_dim, bias=False,dtype=dtype,device=device)
         
         self.scale = torch.tensor(self.head_dim ** 0.5,device=device,dtype=dtype)
 
-        self.out_proj = nn.Linear(Emb_dim, Emb_dim).to(device,dtype)
+        self.out_proj = nn.Linear(Emb_dim, Emb_dim,dtype=dtype,device=device)
         
         self.dropout = nn.Dropout(dropout)
 
@@ -236,11 +236,11 @@ class Linear_Attention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = Emb_dim // self.num_heads
 
-        self.query = nn.Linear(Emb_dim, Emb_dim, bias=False).to(device,dtype)
-        self.key = nn.Linear(Emb_dim, Emb_dim, bias=False).to(device,dtype)
-        self.value = nn.Linear(Emb_dim, Emb_dim, bias=False).to(device,dtype)
+        self.query = nn.Linear(Emb_dim, Emb_dim, bias=False,dtype=dtype,device=device)
+        self.key = nn.Linear(Emb_dim, Emb_dim, bias=False,dtype=dtype,device=device)
+        self.value = nn.Linear(Emb_dim, Emb_dim, bias=False,dtype=dtype,device=device)
         
-        self.out_proj = nn.Linear(Emb_dim, Emb_dim).to(device,dtype)
+        self.out_proj = nn.Linear(Emb_dim, Emb_dim,dtype=dtype,device=device)
         
         self.dropout = nn.Dropout(dropout)
 
@@ -277,23 +277,23 @@ class Multi_latent_Attention(nn.Module):
         self.kv_compressed_dim = kv_compressed_dim
         self.num_heads = num_heads
         self.head_dim = Emb_dim // self.num_heads
-        
-        self.W_dq = nn.Linear(Emb_dim,q_compressed_dim,bias=False).to(device,dtype)
-        self.W_dq_norm = nn.LayerNorm(q_compressed_dim)
-        self.W_uq = nn.Linear(q_compressed_dim,Emb_dim,bias=False).to(device,dtype)
-        
-        self.W_dkv = nn.Linear(Emb_dim,kv_compressed_dim,bias=False).to(device,dtype)
-        self.W_dkv_norm = nn.LayerNorm(kv_compressed_dim)
-        self.W_uk = nn.Linear(kv_compressed_dim,Emb_dim).to(device,dtype)
-        self.W_uv = nn.Linear(kv_compressed_dim,Emb_dim).to(device,dtype)
-        
-        self.out_proj = nn.Linear(Emb_dim, Emb_dim).to(device,dtype)
-        
+
+        self.W_dq = nn.Linear(Emb_dim,q_compressed_dim,bias=False,dtype=dtype,device=device)
+        self.W_dq_norm = nn.LayerNorm(q_compressed_dim,dtype=dtype,device=device)
+        self.W_uq = nn.Linear(q_compressed_dim,Emb_dim,bias=False,dtype=dtype,device=device)
+
+        self.W_dkv = nn.Linear(Emb_dim,kv_compressed_dim,bias=False,dtype=dtype,device=device)
+        self.W_dkv_norm = nn.LayerNorm(kv_compressed_dim,dtype=dtype,device=device)
+        self.W_uk = nn.Linear(kv_compressed_dim,Emb_dim,dtype=dtype,device=device)
+        self.W_uv = nn.Linear(kv_compressed_dim,Emb_dim,dtype=dtype,device=device)
+
+        self.out_proj = nn.Linear(Emb_dim, Emb_dim,dtype=dtype,device=device)
+
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
         Batch_size, Seq_len, C = x.shape
-        
+
         compressed_q_latent = self.W_dq(x)
         compressed_q_latent_norm = self.W_dq_norm(compressed_q_latent)
         q_final = self.W_uq(compressed_q_latent_norm)
@@ -368,15 +368,15 @@ class kv_cache_multihead(nn.Module):
         self.head_dim = emb_dim // num_heads
         self.kv_seq_len = kv_seq_len
 
-        self.query = nn.Linear(emb_dim, emb_dim, bias=False).to(device,dtype)
-        self.key = nn.Linear(emb_dim, emb_dim, bias=False).to(device,dtype)
-        self.value = nn.Linear(emb_dim, emb_dim, bias=False).to(device,dtype)
+        self.query = nn.Linear(emb_dim, emb_dim, bias=False,dtype=dtype,device=device)
+        self.key = nn.Linear(emb_dim, emb_dim, bias=False,dtype=dtype,device=device)
+        self.value = nn.Linear(emb_dim, emb_dim, bias=False,dtype=dtype,device=device)
         
-        self.out_proj = nn.Linear(emb_dim, emb_dim).to(device,dtype)
+        self.out_proj = nn.Linear(emb_dim, emb_dim,dtype=dtype,device=device)
         self.dropout = nn.Dropout(dropout)
 
-        self.cache_keys = torch.zeros(batch_size, kv_seq_len, num_heads, self.head_dim).to(device,dtype)
-        self.cache_value = torch.zeros(batch_size, kv_seq_len, num_heads, self.head_dim).to(device,dtype)
+        self.cache_keys = torch.zeros(batch_size, kv_seq_len, num_heads, self.head_dim,dtype=dtype,device=device)
+        self.cache_value = torch.zeros(batch_size, kv_seq_len, num_heads, self.head_dim,dtype=dtype,device=device)
 
     def forward(self, x, start_pos, RoPE: False):
         batch_size, seq_len, C = x.shape
@@ -425,11 +425,11 @@ class kv_cache_group_query(nn.Module):
         self.num_queries_per_kv = query_num_heads // kv_num_heads
         self.kv_seq_len = kv_seq_len
 
-        self.query = nn.Linear(emb_dim, emb_dim, bias=False).to(device,dtype)
-        self.key = nn.Linear(emb_dim, kv_num_heads * self.head_dim, bias=False).to(device,dtype)
-        self.value = nn.Linear(emb_dim, kv_num_heads * self.head_dim, bias=False).to(device,dtype)
+        self.query = nn.Linear(emb_dim, emb_dim, bias=False,dtype=dtype,device=device)
+        self.key = nn.Linear(emb_dim, kv_num_heads * self.head_dim, bias=False,dtype=dtype,device=device)
+        self.value = nn.Linear(emb_dim, kv_num_heads * self.head_dim, bias=False,dtype=dtype,device=device)
 
-        self.out_proj = nn.Linear(emb_dim, emb_dim).to(device,dtype)
+        self.out_proj = nn.Linear(emb_dim, emb_dim,dtype=dtype,device=device)
         self.dropout = nn.Dropout(dropout)
 
         # KV caches

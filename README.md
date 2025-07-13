@@ -1,35 +1,10 @@
-we only get emb_dim, n_head, max_token_id and dropout as input to our model
+google colab: `https://colab.research.google.com/drive/1L7feQvzgxWigEEA8EE6j9ADMz8sJetQv#scrollTo=nlZcK6X7RnUb`
 
 1) first complete work on attention mechanism:
-    1) self attention ✅
-    2) multi head attention ✅
-    3) multi head cross attention ✅
-    4) multi query attention ✅
-    5) grouped query attention ✅
-    6) multi head latent attention ✅ 
-    7) linear attention ✅
-    8) KV catch with MLA ✅
-    9) KV catch with GQA ✅
-
-
-todo:
-    - flash attention tooo deficult (may be with another library)
+    - flash attention tooo deficult
+    - Mixture of expose (MoE)
     - big bird (Spars attention) -> global + random + window masks 
 
-2) Normalization and skip connection:
-- layer normalization ✅
-- RMS normalization ✅
-
-3) Feed forward layer:
-    - standard feed forward
-    - GLU feed forward
-
-Activation function:
-    - sigmoid ✅
-    - relu ✅
-    - gelu ✅
-    - leaky relu ✅
-    - slu/swish ✅
 
 4) position embedding:
     - Abosulet embedding (arange()) | 3 ✅
