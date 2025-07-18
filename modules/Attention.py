@@ -4,6 +4,7 @@ import torch.nn.functional as F
 class Self_Attention(nn.Module):
     def __init__(self, Emb_dim, dropout,dtype=torch.float32,device='cpu'):
         super().__init__()
+        self.device = device
         self.scale = torch.tensor(Emb_dim ** 0.5,dtype=dtype,device=device)
         
         self.key = nn.Linear(Emb_dim, Emb_dim, bias=False,dtype=dtype,device=device)
@@ -38,6 +39,7 @@ class Multi_Head_Attention(nn.Module):
         assert Emb_dim % num_heads == 0, "Emb_dim must be divisible by num_heads"
         self.Emb_dim = Emb_dim
         self.num_heads = num_heads
+        self.device = device
         self.head_dim = Emb_dim // num_heads
 
         self.key = nn.Linear(Emb_dim, Emb_dim, bias=False,dtype=dtype,device=device)
@@ -81,6 +83,7 @@ class Cross_MultiHead_Attention(nn.Module):
         super().__init__()
         assert Emb_dim % num_heads == 0, "Emb_dim must be divisible by num_heads"
         self.Emb_dim = Emb_dim
+        self.device = device
         self.num_heads = num_heads
         self.head_dim = Emb_dim // num_heads
 
@@ -128,6 +131,7 @@ class Multi_query_Attention(nn.Module):
         super().__init__()
         assert Emb_dim % num_heads == 0, "Emb_dim must be divisible by num_heads"
         self.Emb_dim = Emb_dim
+        self.device = device
         self.num_heads = num_heads
         self.head_dim = Emb_dim // num_heads
 
@@ -176,6 +180,7 @@ class Group_query_Attention(nn.Module):
         super().__init__()
         assert Emb_dim % num_query_heads == 0, "Emb_dim must be divisible by num_heads"
         self.Emb_dim = Emb_dim
+        self.device = device
         self.num_query_heads = num_query_heads
         self.num_kv_heads = num_kv_heads
         
@@ -228,6 +233,7 @@ class Linear_Attention(nn.Module):
         assert Emb_dim % num_heads == 0, "Emb_dim must be divisible by num_heads"
         self.Emb_dim = Emb_dim
         self.eps = eps
+        self.device = device
         self.dtype=dtype
         self.num_heads = num_heads
         self.head_dim = Emb_dim // self.num_heads
@@ -269,6 +275,7 @@ class Multi_latent_Attention(nn.Module):
         super().__init__()
         assert Emb_dim % num_heads == 0, "Emb_dim must be divisible by num_heads"
         self.Emb_dim = Emb_dim
+        self.device = device
         self.q_compressed_dim = q_compressed_dim
         self.kv_compressed_dim = kv_compressed_dim
         self.num_heads = num_heads
