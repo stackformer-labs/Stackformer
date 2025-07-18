@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 class Self_Attention(nn.Module):
     def __init__(self, Emb_dim, dropout,dtype=torch.float32,device='cpu'):
         super().__init__()
@@ -14,7 +13,7 @@ class Self_Attention(nn.Module):
         self.out_proj = nn.Linear(Emb_dim, Emb_dim,dtype=dtype,device=device)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x, mask: bool = True):
+    def forward(self, x):
         Batch_size, Seq_len, Emb_dim = x.size()
         
         Querys = self.query(x)  # (Batch_size, Seq_len, D)
@@ -24,9 +23,8 @@ class Self_Attention(nn.Module):
         # Attention scores
         scores = Querys @ Keys.transpose(-2, -1) / self.scale  # (Batch_size, Seq_len, Seq_len)
 
-        if mask:
-            causal_mask = torch.triu(torch.ones(Seq_len, Seq_len, device=x.device)).unsqueeze(0)  # (1, Seq_len, Seq_len)
-            scores = scores.masked_fill(causal_mask == 0, float('-inf'))
+        causal_mask = torch.triu(torch.ones(Seq_len, Seq_len, dtype=torch.bool, device=self.device), diagonal=1)
+        scores = scores.masked_fill(causal_mask, float('-inf'))  # Mask *future* tokens
 
         attn = F.softmax(scores, dim=-1)  # (Batch_size, Seq_len, Seq_len)
         attn = self.dropout(attn)
@@ -51,7 +49,7 @@ class Multi_Head_Attention(nn.Module):
         
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x, mask=True):
+    def forward(self, x):
         Batch_size, Seq_len, _ = x.shape
         
         # Generate Q, K, V and reshape for multi-head attention
@@ -63,10 +61,9 @@ class Multi_Head_Attention(nn.Module):
         scores = (Querys @ Keys.transpose(-2, -1)) / self.scale  # (Batch_size, nh, Seq_len, Seq_len)
 
         # Apply causal mask if requested
-        if mask:
-            causal_mask = torch.triu(torch.ones(Seq_len, Seq_len, device=x.device)).bool()
-            scores = scores.masked_fill(causal_mask, float('-inf'))
-
+        causal_mask = torch.triu(torch.ones(Seq_len, Seq_len, dtype=torch.bool, device=self.device), diagonal=1)
+        scores = scores.masked_fill_(causal_mask[None, None, :, :], float('-inf'))
+        
         # Apply softmax and dropout
         attn = F.softmax(scores, dim=-1)
         attn = self.dropout(attn)
@@ -97,7 +94,7 @@ class Cross_MultiHead_Attention(nn.Module):
         self.out_proj = nn.Linear(Emb_dim, Emb_dim,dtype=dtype,device=device)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x, context=None, mask=None):
+    def forward(self, x, context=None):
         """
         x: (Batch_size, query_seq_len, Emb_dim) — query input (e.g., decoder hidden states)
         context: (Batch_size, KV_seq_len, Emb_dim) — source for keys/values (e.g., encoder output). If None, self-attention.
@@ -115,10 +112,9 @@ class Cross_MultiHead_Attention(nn.Module):
         # Attention scores
         scores = (Querys @ Keys.transpose(-2, -1)) / self.scale  # (Batch_size, nh, query_seq_len, KV_seq_len)
 
-        if mask is not None:            
-            causal_mask = torch.triu(torch.ones(query_seq_len, query_seq_len, device=x.device)).bool()
-            scores = scores.masked_fill(causal_mask, float('-inf'))
-
+        causal_mask = torch.triu(torch.ones(query_seq_len, query_seq_len, dtype=torch.bool, device=self.device), diagonal=1)
+        scores = scores.masked_fill_(causal_mask[None, None, :, :], float('-inf'))
+        
         attn = F.softmax(scores, dim=-1)
         attn = self.dropout(attn)
 
@@ -160,8 +156,8 @@ class Multi_query_Attention(nn.Module):
         scores = (Querys @ Keys.transpose(-2, -1)) / self.scale  # (Batch_size, nh, Seq_len, Seq_len)
 
         # Apply causal mask if requested
-        causal_mask = torch.triu(torch.ones(Seq_len, Seq_len, device=x.device)).bool()
-        scores = scores.masked_fill(causal_mask, float('-inf'))
+        causal_mask = torch.triu(torch.ones(Seq_len, Seq_len, dtype=torch.bool, device=self.device), diagonal=1)
+        scores = scores.masked_fill_(causal_mask[None, None, :, :], float('-inf'))
 
         # Apply softmax and dropout
         attn = F.softmax(scores, dim=-1)
@@ -211,8 +207,8 @@ class Group_query_Attention(nn.Module):
         scores = (Querys @ Keys.transpose(-2, -1)) / self.scale  # (Batch_size, nh, Seq_len, Seq_len)
 
         # Apply causal mask if requested
-        causal_mask = torch.triu(torch.ones(Seq_len, Seq_len, device=x.device)).bool()
-        scores = scores.masked_fill(causal_mask, float('-inf'))
+        causal_mask = torch.triu(torch.ones(Seq_len, Seq_len, dtype=torch.bool, device=self.device), diagonal=1)
+        scores = scores.masked_fill_(causal_mask[None, None, :, :], float('-inf'))
 
         # Apply softmax and dropout
         attn = F.softmax(scores, dim=-1)
@@ -403,6 +399,11 @@ class kv_cache_multihead(nn.Module):
         value = xv_full.transpose(1, 2)    # (batch_size, num_head, T_total, emb_dim)
                 
         attn_scores = torch.matmul(query, key.transpose(2, 3)) / (self.head_dim ** 0.5)
+        
+        # Causal mask
+        causal_mask = torch.triu(torch.ones(seq_len, seq_len, dtype=torch.bool, device=self.device), diagonal=1)
+        attn_scores.masked_fill_(causal_mask[None, None, :, :], float('-inf'))
+        
         attn_weights = F.softmax(attn_scores, dim=-1)
         out = torch.matmul(attn_weights, value)
 
@@ -466,6 +467,11 @@ class kv_cache_group_query(nn.Module):
 
         # Attention
         attn_scores = torch.matmul(query, key.transpose(2, 3)) / (self.head_dim ** 0.5)
+        
+        # Causal mask
+        causal_mask = torch.triu(torch.ones(seq_len, seq_len, dtype=torch.bool, device=self.device), diagonal=1)
+        attn_scores.masked_fill_(causal_mask[None, None, :, :], float('-inf'))
+        
         attn_weights = F.softmax(attn_scores, dim=-1)
         out = torch.matmul(attn_weights, value)
 
