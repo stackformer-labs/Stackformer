@@ -25,7 +25,7 @@ class Self_Attention(nn.Module):
         scores = Querys @ Keys.transpose(-2, -1) / self.scale  # (Batch_size, Seq_len, Seq_len)
 
         causal_mask = torch.triu(torch.ones(Seq_len, Seq_len, dtype=torch.bool, device=self.device), diagonal=1)
-        scores = scores.masked_fill(causal_mask, float('-inf'))  # Mask *future* tokens
+        scores = scores.masked_fill_(causal_mask, float('-inf'))  # Mask *future* tokens
 
         attn = F.softmax(scores, dim=-1)  # (Batch_size, Seq_len, Seq_len)
         attn = self.dropout(attn)
@@ -321,6 +321,53 @@ class Multi_latent_Attention(nn.Module):
         out = self.out_proj(out.transpose(1, 2).contiguous().view(Batch_size, Seq_len, C))
         out = self.dropout(out)
         return out
+
+class Local_Attention(nn.Module):
+    def __init__(self, Emb_dim, num_heads, Window_size ,dropout, device='cpu',dtype=torch.float32):
+        super().__init__()
+        assert Emb_dim % num_heads == 0, "Emb_dim must be divisible by num_heads"
+        self.Emb_dim = Emb_dim
+        self.Window_size = Window_size
+        self.device = device
+        self.num_heads = num_heads
+        self.head_dim = Emb_dim // num_heads
+
+        self.key = nn.Linear(Emb_dim, Emb_dim, bias=False,dtype=dtype,device=device)
+        self.query = nn.Linear(Emb_dim, Emb_dim, bias=False,dtype=dtype,device=device)
+        self.value = nn.Linear(Emb_dim, Emb_dim, bias=False,dtype=dtype,device=device)
+        
+        self.scale = torch.tensor(self.head_dim ** 0.5,device=device,dtype=dtype)
+        self.out_proj = nn.Linear(Emb_dim, Emb_dim,dtype=dtype,device=device)
+        
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        Batch_size, Seq_len, _ = x.shape
+        
+        # Generate Q, K, V and reshape for multi-head attention
+        Keys = self.key(x).view(Batch_size, Seq_len, self.num_heads, self.head_dim).transpose(1, 2)  # (Batch_size, nh, Seq_len, hd)
+        Querys = self.query(x).view(Batch_size, Seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        Values = self.value(x).view(Batch_size, Seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+
+        # Compute attention scores
+        scores = (Querys @ Keys.transpose(-2, -1)) / self.scale  # (Batch_size, nh, Seq_len, Seq_len)
+
+        # Apply sliding window mask
+        casual = torch.tril(torch.ones_like(scores,dtype=bool))
+        band = torch.triu(casual, diagonal=-(self.Window_size-1))
+        scores = scores.masked_fill_(~band, float('-inf'))
+        
+        # Apply softmax and dropout
+        attn = F.softmax(scores, dim=-1)
+        attn = self.dropout(attn)
+
+        # Apply attention to values
+        out = attn @ Values  # (Batch_size, nh, Seq_len, hd)
+        
+        # Concatenate heads and project
+        out = out.transpose(1, 2).contiguous().view(Batch_size, Seq_len, self.Emb_dim)  # (Batch_size, Seq_len, Emb_dim)
+        
+        return self.out_proj(out)
 
 def precompute_theta_position_frequency(head_dim, seq_len, device='cpu', theta=10000.0):
     assert head_dim % 2 == 0, "head_dim must be even"

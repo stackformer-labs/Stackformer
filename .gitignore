@@ -1,3 +1,6 @@
-/modules_test/
-/models_test/
 /datasets/
+README.md
+pyproject.toml
+setup.py
+LICENSE
+modules/mask.py

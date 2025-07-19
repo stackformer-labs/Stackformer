@@ -13,6 +13,7 @@ from modules.Attention import Multi_query_Attention
 from modules.Attention import Group_query_Attention
 from modules.Attention import Linear_Attention
 from modules.Attention import Multi_latent_Attention
+from modules.Attention import Local_Attention
 from modules.Attention import kv_cache_multihead
 from modules.Attention import kv_cache_group_query
 

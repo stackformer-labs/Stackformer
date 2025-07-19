@@ -101,12 +101,12 @@ class LayerNorm(nn.Module):
 
 # --- single block ---
 class block(nn.Module):
-    def __init__(self, Emb_dim, num_heads, dropout, hidden_dim, esp=1e-5, device='cpu',dtype=torch.float32):
+    def __init__(self, Emb_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu',dtype=torch.float32):
         super().__init__()
         self.attentation = Multi_Head_Attention(Emb_dim, num_heads, dropout, device=device,dtype=dtype)
-        self.norm1 = LayerNorm(Emb_dim, eps=esp, device=device, dtype=dtype)
+        self.norm1 = LayerNorm(Emb_dim, eps=eps, device=device, dtype=dtype)
         self.ff_relu = FF_ReLU(Emb_dim, hidden_dim,device=device,dtype=dtype)
-        self.norm2 = LayerNorm(Emb_dim, eps=esp, device=device, dtype=dtype)
+        self.norm2 = LayerNorm(Emb_dim, eps=eps, device=device, dtype=dtype)
         
     def forward(self, x):
         residual = x
@@ -120,10 +120,10 @@ class block(nn.Module):
 
 # --- Encoder ---
 class Encoder(nn.Module):
-    def __init__(self, num_layers, Emb_dim, num_heads, dropout, hidden_dim, esp=1e-5, device='cpu',dtype=torch.float32):
+    def __init__(self, num_layers, Emb_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu',dtype=torch.float32):
         super().__init__()
         self.layers = nn.ModuleList([
-            block(Emb_dim, num_heads, dropout, hidden_dim, esp, device=device,dtype=dtype)
+            block(Emb_dim, num_heads, dropout, hidden_dim, eps, device=device,dtype=dtype)
             for _ in range(num_layers)
         ])
         
@@ -157,7 +157,7 @@ class GPTModel(nn.Module):
             num_heads=config['num_heads'],
             dropout=config.get('dropout', 0.1),
             hidden_dim=config['hidden_dim'],
-            esp=config.get('eps', 1e-5),
+            eps=config.get('eps', 1e-5),
             device=self.device,
             dtype=self.dtype
         )
