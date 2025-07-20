@@ -2,7 +2,7 @@ import os
 import torch
 from torch.optim import AdamW, SGD
 from torch.optim.lr_scheduler import CosineAnnealingLR,LinearLR
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 class Trainer:
@@ -14,19 +14,21 @@ class Trainer:
                 eval_batch_size,
                 output_dir,
                 num_epoch,
-                max_steps,
-                max_eval_step,
                 lr: float,
                 scheduler_type, 
                 Save_step,
                 Save_epoch,
                 grad_accumulation_step, 
                 optimizer_type,
-                weight_decay,
+                weight_decay, 
                 warmup_steps,
+                max_steps,
+                max_eval_step,
+                max_epoch = None,
+                model_to_resume=None,
+                resume_training=False,
                 seed=42,
-                device='cpu'
-                ):
+                device='cpu'):
         self.model = model
         self.train_dataset = train_dataset
         self.train_batch_size = train_batch_size
@@ -34,10 +36,13 @@ class Trainer:
         self.eval_batch_size = eval_batch_size
         self.num_epoch = num_epoch
         self.max_steps = max_steps
+        self.max_epoch = max_epoch
         self.max_eval_step = max_eval_step
         self.lr = lr
         self.scheduler_type = scheduler_type
         self.output_dir = output_dir
+        self.model_to_resume = model_to_resume
+        self.resume_training = resume_training
         self.Save_step = Save_step
         self.Save_epoch = Save_epoch
         self.grad_accumulation_step = grad_accumulation_step
@@ -46,7 +51,12 @@ class Trainer:
         self.warmup_steps = warmup_steps
         self.seed = seed
         self.device = device
-        
+    
+    # --- random seed ---
+    def set_seed(self,seed):
+        torch.manual_seed(seed)
+        if self.device == 'cuda': 
+            torch.cuda.manual_seed_all(seed)
         
     # --- scheduler ---
     def get_scheduler(self, scheduler_type, total_training_steps, optimizer):
@@ -86,11 +96,11 @@ class Trainer:
     
     # --- train dataloader ---
     def get_train_loader(self, train_dataset, batch_size, seed):
-        # set_seed(self.seed)
         generator = torch.Generator()
         generator.manual_seed(seed)
         train_loader = DataLoader(train_dataset, batch_size=batch_size,
-        shuffle=True, #num_workers=2,
+        shuffle=True,
+        # num_workers=2,
         # worker_init_fn=worker_init_fn,
         generator=generator
         )
@@ -98,23 +108,23 @@ class Trainer:
 
     # --- validation dataloader ---
     def get_eval_loader(self, eval_dataset, batch_size, seed):
-        # set_seed(seed)
         generator = torch.Generator()
         generator.manual_seed(seed)
         eval_loader = DataLoader(eval_dataset, batch_size=batch_size,
-        shuffle=False, #num_workers=2,
+        shuffle=False,
+        #num_workers=2,
         # worker_init_fn=worker_init_fn,
         generator=generator
         )
         return eval_loader
     # --- save model ---
     def save_model(self, model, optimizer, scheduler,
-                batch_idx, epoch, loss, global_step, output_dir, name):
+                epoch, num_epoch, loss, global_step, output_dir, name):
         checkpoint = { 'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'scheduler_state_dict': scheduler.state_dict() if scheduler else None,
-            'batch_idx': batch_idx,
-            'epoch': epoch,
+            'current_epoch': epoch,
+            'num_epoch': num_epoch,
             'loss': loss,
             'global_step': global_step,
             'rng_state':{
@@ -124,10 +134,31 @@ class Trainer:
         path = f'{output_dir}/checkpoint_{name}.pt'
         torch.save(checkpoint, path)
         print(f'Saved training state to {path}')
+        
+    def load_checkpoint(self, path, model, optimizer, scheduler):
+        checkpoint = torch.load(path, map_location=self.device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        if checkpoint.get('scheduler_state_dict') is not None and scheduler is not None:
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        current_epoch = checkpoint['current_epoch']
+        global_step = checkpoint['global_step']
+        loss = checkpoint['loss']
+        num_epoch = checkpoint['num_epoch']
+        # RNG
+        torch.set_rng_state(checkpoint['rng_state']['torch'])
+        if torch.cuda.is_available() and checkpoint['rng_state']['cuda']:
+            torch.cuda.set_rng_state(checkpoint['rng_state']['cuda'][0])
+        return {
+            'current_epoch': current_epoch,
+            'num_epoch': num_epoch,
+            'global_step': global_step,
+            'loss': loss}
+    
     # --- train ---
     def train(self):
-        # --- model to device ---
-        model = self.model.to(self.device)
+        # --- seed --- 
+        self.set_seed(self.seed)
         # --- dataloader ---
         train_loader = self.get_train_loader(self.train_dataset, self.train_batch_size, self.seed)
         eval_loader = self.get_eval_loader(self.eval_dataset, self.eval_batch_size, self.seed)
@@ -138,16 +169,33 @@ class Trainer:
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
         
-        # --- Get optimizer, lr, criterion and lr-scheduler
-        criterion = torch.nn.functional.cross_entropy
+        model = self.model.to(self.device)
         optimizer = self.get_optimizer(self.optimizer_type, model, self.lr, self.weight_decay)
+        criterion = torch.nn.functional.cross_entropy
         scheduler = self.get_scheduler(self.scheduler_type, total_training_steps, optimizer)
+        
         global_step = 0
-        for epoch in range(self.num_epoch):
+        start_epoch = 0
+        num_epoch = self.num_epoch
+        loss = torch.tensor(0.0, device=self.device)
+        ckpt_global_step = 0
+
+        if self.resume_training:
+            ckpt_data = self.load_checkpoint(self.model_to_resume, model, optimizer, scheduler)
+            start_epoch = ckpt_data['current_epoch']
+            num_epoch = ckpt_data['num_epoch']
+            ckpt_global_step = ckpt_data['global_step']
+            loss = ckpt_data['loss']
+            
+        for epoch in range(start_epoch,num_epoch):
             model.train()
             epoch_loss = 0
-            pbar = tqdm(train_loader, desc=f"epoch {epoch+1}/{self.num_epoch}",leave=False)
+            pbar = tqdm(train_loader, desc=f"epoch {epoch+1}/{num_epoch}",leave=False)
             for batch_idx, batch in enumerate(pbar):
+                if self.resume_training and global_step < ckpt_global_step:
+                    global_step += 1
+                    continue
+                global_step += 1
                 # --- load the inputs and targets ---
                 inputs, targets = batch
                 inputs = inputs.to(self.device)
@@ -163,23 +211,31 @@ class Trainer:
                 # --- gradient accumulation ---
                 if (batch_idx + 1) % self.grad_accumulation_step == 0 or global_step >= self.max_steps:
                     optimizer.step()
-                    scheduler.step()
+                    if scheduler is not None:
+                        scheduler.step()
                     optimizer.zero_grad()
                 
-                global_step += 1 
-                if global_step >= self.max_steps:
-                    self.save_model(model, optimizer, scheduler,
-                    batch_idx, epoch, loss, global_step, self.output_dir, 'final')
+                if self.max_steps is not None and global_step >= self.max_steps:
+                    self.save_model(model=model, optimizer=optimizer, scheduler=scheduler,
+                    epoch=epoch+1, num_epoch=num_epoch, loss=epoch_loss,
+                    global_step=global_step, output_dir=self.output_dir, name= f'epoch_{epoch+1}_step_{global_step}')
                     return
                 if self.Save_step and (batch_idx + 1) % self.Save_step == 0:
-                    self.save_model(model, optimizer, scheduler,
-                batch_idx, epoch, loss, global_step, self.output_dir, f'{epoch}_{batch_idx}')
-            
-            if self.Save_epoch and (epoch + 1) % self.Save_epoch == 0:
-                self.save_model(model, optimizer, scheduler,
-                batch_idx, epoch, loss, global_step, self.output_dir, f'{epoch}_{batch_idx}')
-            
+                    self.save_model(model=model, optimizer=optimizer, scheduler=scheduler,
+                    epoch=epoch+1, num_epoch=num_epoch, loss=epoch_loss,
+                    global_step=global_step, output_dir=self.output_dir, name = f'epoch_{epoch+1}_step_{global_step}' )
+
             avg_epoch_loss = epoch_loss / len(train_loader)
             print(f"Epoch {epoch+1} finished Loss: {avg_epoch_loss:.4f}")
             avg_eval_loss = self.eval_model(model, eval_loader, self.max_eval_step)
             print(f"Eval loss: {avg_eval_loss:.4f}")
+            
+            if self.max_epoch is not None and (epoch+1) == self.max_epoch:
+                    self.save_model(model=model, optimizer=optimizer, scheduler=scheduler,
+                    epoch=epoch+1, num_epoch=num_epoch, loss=epoch_loss,
+                    global_step=global_step, output_dir=self.output_dir, name=f'epoch_{epoch+1}_step_{global_step}')
+                    return
+            if self.Save_epoch and (epoch + 1) % self.Save_epoch == 0:
+                self.save_model(model=model, optimizer=optimizer, scheduler=scheduler,
+                    epoch=epoch+1, num_epoch=num_epoch, loss=epoch_loss,
+                    global_step=global_step, output_dir=self.output_dir, name=f'epoch_{epoch+1}_step_{global_step}')
