@@ -1,0 +1,24 @@
+[project]
+name = "stackformer"
+version = "0.0.1"
+description = "Modular transformer blocks built in PyTorch"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+
+authors = [
+  {name = "Gurumurthy", email = "gurumurthy.00300@gmail.com"}
+]
+
+[project.urls]
+"Repository" = "https://github.com/Gurumurthy30/Stackformer"
+"Issue Tracker" = "https://github.com/Gurumurthy30/Stackformer/issues"
+"Discussions" = "https://github.com/Gurumurthy30/Stackformer/discussions"
+
+[project.dependencies]
+torch = ">=2.6"
+tqdm = ">=4.67"
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
