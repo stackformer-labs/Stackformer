@@ -1,6 +1,2 @@
 /datasets/
-README.md
-pyproject.toml
-setup.py
-LICENSE
 modules/mask.py

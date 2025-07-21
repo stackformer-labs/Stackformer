@@ -12,7 +12,6 @@ class Trainer:
                 eval_dataset,
                 train_batch_size,
                 eval_batch_size,
-                vocab_size,
                 output_dir,
                 num_epoch,
                 lr: float,
@@ -35,7 +34,6 @@ class Trainer:
         self.train_batch_size = train_batch_size
         self.eval_dataset = eval_dataset
         self.eval_batch_size = eval_batch_size
-        self.vocab_size = vocab_size
         self.num_epoch = num_epoch
         self.max_steps = max_steps
         self.max_epoch = max_epoch
