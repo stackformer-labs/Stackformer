@@ -203,9 +203,9 @@ class Trainer:
                 inputs = inputs.to(self.device)
                 targets = targets.to(self.device)
                 # --- get_prediction from model ---
-                output = model(inputs)
+                logits = model(inputs)  # [B, T, V]
                 # --- calculate loss ---
-                loss = criterion(output.view(-1,self.vocab_size), targets.view(-1))
+                loss = criterion(logits.view(-1, logits.shape[-1]), targets.view(-1))
                 loss = loss / self.grad_accumulation_step
                 loss.backward()
                 pbar.set_postfix(loss=loss.item() * self.grad_accumulation_step)
