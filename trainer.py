@@ -194,7 +194,7 @@ class Trainer:
         # --- dataloader ---
         train_loader = self.get_train_loader(self.train_dataset, self.train_batch_size, self.seed)
         eval_loader = self.get_eval_loader(self.eval_dataset, self.eval_batch_size, self.seed)
-        
+
         # --- Calculate the total step ---
         steps_per_epoch = len(train_loader) // self.grad_accumulation_step
         total_training_steps = self.max_steps if self.max_steps is not None else steps_per_epoch * self.num_epoch
@@ -217,6 +217,13 @@ class Trainer:
             global_step = ckpt_data['global_step']
             print(f"Resuming training from epoch {start_epoch}, step {global_step}")
             
+        # --- print info ---
+        print(f"Number of parameters: {sum(p.numel() for p in self.model.parameters()):,}")
+        print(f"Number of train samples: {len(self.train_dataset):,}")
+        print(f"Number of eval samples: {len(self.eval_dataset):,}")
+        print(f"Train steps per epoch (batches): {len(train_loader):,}")
+        print(f"Eval steps per epoch (batches): {len(eval_loader):,}")
+        
         for epoch in range(start_epoch, num_epoch):
             model.train()
             epoch_loss = 0
@@ -263,6 +270,7 @@ class Trainer:
                         global_step=global_step, output_dir=self.output_dir, 
                         name=f'final_step_epoch_{epoch+1}_step_{global_step}'
                     )
+                    print("--- Reached max training step ---")
                     return
                 
                 # Save at specific steps
@@ -300,6 +308,7 @@ class Trainer:
                     global_step=global_step, output_dir=self.output_dir, 
                     name=f'final_model_epoch_{epoch+1}_step_{global_step}'
                 )
+                print("--- Reached max training epoch ---")
                 return
             
             # Save at specific epochs
