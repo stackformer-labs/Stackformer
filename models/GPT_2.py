@@ -5,27 +5,25 @@ import torch.nn.functional as F
 
 # --- position embedding ---
 class SinusoidalPositionalEmbedding(nn.Module):
-    def __init__(self, seq_len, Emb_dim):
+    def __init__(self, max_len, emb_dim):
         super().__init__()
-        self.seq_len = seq_len
-        self.Emb_dim = Emb_dim
-
-        position = torch.arange(0, seq_len).unsqueeze(1)  # (seq_len, 1)
-        div_term = torch.exp(torch.arange(0, Emb_dim, 2) * -(math.log(10000.0) / Emb_dim))  # (Emb_dim/2)
-
-        pe = torch.zeros(seq_len, Emb_dim)  # (seq_len, Emb_dim)
+        self.max_len = max_len
+        self.emb_dim = emb_dim
+        position = torch.arange(0, max_len).unsqueeze(1)  # (max_len, 1)
+        div_term = torch.exp(torch.arange(0, emb_dim, 2) * -(math.log(10000.0) / emb_dim))  # (emb_dim//2)
+        pe = torch.zeros(max_len, emb_dim)  # (max_len, emb_dim)
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
-
-        # Register as buffer so it's moved with model
-        self.register_buffer("pe", pe)
-
-    def forward(self, seq_len, batch_size=None):
-        pe = self.pe[:seq_len]  # (seq_len, dim)
-        if batch_size is not None:
-            return pe.unsqueeze(0).expand(batch_size, -1, -1)  # (B, T, D)
+        self.register_buffer("pe", pe)  # (max_len, emb_dim)
+    def forward(self, x):
+        if x.dim() == 2:  # [B, T]
+            batch_size, seq_len = x.size()
+        elif x.dim() == 3:  # [B, T, D]
+            batch_size, seq_len, _ = x.size()
         else:
-            return pe  # (T, D)
+            raise ValueError(f"Unsupported input shape: {x.shape}")
+        pos_emb = self.pe[:seq_len]  # [T, D]
+        return pos_emb.unsqueeze(0).expand(batch_size, -1, -1)  # [B, T, D]
 
 
 # --- Multi Head Attention ---
