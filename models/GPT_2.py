@@ -55,20 +55,20 @@ class SinusoidalPositionalEmbedding(nn.Module):
 
 # --- Multi Head Attention ---
 class MultiHeadAttention(nn.Module):
-    def __init__(self, emb_dim, num_heads, dropout=0.1, device='cpu', dtype=torch.float32):
+    def __init__(self, Emb_dim, num_heads, dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
-        assert emb_dim % num_heads == 0, "emb_dim must be divisible by num_heads"
-        self.emb_dim = emb_dim
+        assert Emb_dim % num_heads == 0, "Emb_dim must be divisible by num_heads"
+        self.Emb_dim = Emb_dim
         self.device = device
         self.num_heads = num_heads
-        self.head_dim = emb_dim // num_heads
+        self.head_dim = Emb_dim // num_heads
 
-        self.key = nn.Linear(emb_dim, emb_dim, bias=False, dtype=dtype, device=device)
-        self.query = nn.Linear(emb_dim, emb_dim, bias=False, dtype=dtype, device=device)
-        self.value = nn.Linear(emb_dim, emb_dim, bias=False, dtype=dtype, device=device)
+        self.key = nn.Linear(Emb_dim, Emb_dim, bias=False, dtype=dtype, device=device)
+        self.query = nn.Linear(Emb_dim, Emb_dim, bias=False, dtype=dtype, device=device)
+        self.value = nn.Linear(Emb_dim, Emb_dim, bias=False, dtype=dtype, device=device)
         
         self.scale = math.sqrt(self.head_dim)
-        self.out_proj = nn.Linear(emb_dim, emb_dim, dtype=dtype, device=device)
+        self.out_proj = nn.Linear(Emb_dim, Emb_dim, dtype=dtype, device=device)
         
         self.dropout = nn.Dropout(dropout)
 
@@ -95,30 +95,30 @@ class MultiHeadAttention(nn.Module):
         out = attn @ values
         
         # Concatenate heads and project
-        out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, self.emb_dim)
+        out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, self.Emb_dim)
         
         return self.out_proj(out)
 
 # --- Feed Forward ---
 class FF_ReLU(nn.Module):
-    def __init__(self, emb_dim, hidden_dim, dropout=0.1, device='cpu', dtype=torch.float32):
+    def __init__(self, Emb_dim, hidden_dim, dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(emb_dim, hidden_dim, device=device, dtype=dtype),
+        self.relu = nn.Sequential(
+            nn.Linear(Emb_dim, hidden_dim, device=device, dtype=dtype),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim, emb_dim, device=device, dtype=dtype),
+            nn.Linear(hidden_dim, Emb_dim, device=device, dtype=dtype),
         )
     
     def forward(self, x):
-        return self.net(x)
+        return self.relu(x)
 
 class LayerNorm(nn.Module):
-    def __init__(self, emb_dim, eps=1e-5, device='cpu', dtype=torch.float32):
+    def __init__(self, Emb_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
         self.eps = eps
-        self.weight = nn.Parameter(torch.ones(emb_dim, device=device, dtype=dtype))
-        self.bias = nn.Parameter(torch.zeros(emb_dim, device=device, dtype=dtype))
+        self.weight = nn.Parameter(torch.ones(Emb_dim, device=device, dtype=dtype))
+        self.bias = nn.Parameter(torch.zeros(Emb_dim, device=device, dtype=dtype))
 
     def forward(self, x):
         mean = x.mean(dim=-1, keepdim=True)
@@ -128,12 +128,12 @@ class LayerNorm(nn.Module):
 
 # --- Transformer Block ---
 class Block(nn.Module):
-    def __init__(self, emb_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
+    def __init__(self, Emb_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
-        self.attention = MultiHeadAttention(emb_dim, num_heads, dropout, device=device, dtype=dtype)
-        self.norm1 = LayerNorm(emb_dim, eps=eps, device=device, dtype=dtype)
-        self.ff_relu = FF_ReLU(emb_dim, hidden_dim, dropout, device=device, dtype=dtype)
-        self.norm2 = LayerNorm(emb_dim, eps=eps, device=device, dtype=dtype)
+        self.attention = MultiHeadAttention(Emb_dim, num_heads, dropout, device=device, dtype=dtype)
+        self.norm1 = LayerNorm(Emb_dim, eps=eps, device=device, dtype=dtype)
+        self.ff_relu = FF_ReLU(Emb_dim, hidden_dim, dropout, device=device, dtype=dtype)
+        self.norm2 = LayerNorm(Emb_dim, eps=eps, device=device, dtype=dtype)
         
     def forward(self, x):
         # Pre-norm: normalize before attention
@@ -152,10 +152,10 @@ class Block(nn.Module):
 
 # --- Encoder ---
 class Encoder(nn.Module):
-    def __init__(self, num_layers, emb_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
+    def __init__(self, num_layers, Emb_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
         self.layers = nn.ModuleList([
-            Block(emb_dim, num_heads, dropout, hidden_dim, eps, device=device, dtype=dtype)
+            Block(Emb_dim, num_heads, dropout, hidden_dim, eps, device=device, dtype=dtype)
             for _ in range(num_layers)
         ])
         
@@ -177,21 +177,21 @@ class GPTModel(nn.Module):
             self.dtype = torch.float32
         
         # --- Token embedding ---
-        self.embedding = nn.Embedding(vocab_size, config['emb_dim'], dtype=self.dtype, device=self.device)
+        self.embedding = nn.Embedding(vocab_size, config['Emb_dim'], dtype=self.dtype, device=self.device)
         
         # --- Embedding dropout ---
         self.emb_dropout = nn.Dropout(config.get('dropout', 0.1))
         
         # --- Adaptive position embedding ---
         self.position_embedding = SinusoidalPositionalEmbedding(
-            config['emb_dim'], 
+            config['Emb_dim'], 
             max_seq_len=config.get('max_seq_len', config.get('seq_len', 2048))
         )
 
         # --- Encoder ---
         self.encoder = Encoder(
             num_layers=config['num_layers'],
-            emb_dim=config['emb_dim'],
+            Emb_dim=config['Emb_dim'],
             num_heads=config['num_heads'],
             dropout=config.get('dropout', 0.1),
             hidden_dim=config['hidden_dim'],
@@ -201,11 +201,11 @@ class GPTModel(nn.Module):
         )
         
         # --- Final norm        
-        self.final_norm = LayerNorm(config['emb_dim'], eps=config.get('eps', 1e-5),
+        self.final_norm = LayerNorm(config['Emb_dim'], eps=config.get('eps', 1e-5),
                             device=self.device, dtype=self.dtype)
         
         # --- Output Projection ---
-        self.lm_head = nn.Linear(config['emb_dim'], vocab_size, bias=False, 
+        self.lm_head = nn.Linear(config['Emb_dim'], vocab_size, bias=False, 
                     dtype=self.dtype, device=self.device)
     
     def forward(self, x):
