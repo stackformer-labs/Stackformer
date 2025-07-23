@@ -172,7 +172,7 @@ class GPTModel(nn.Module):
     
     def forward(self, x, batch_size=None):
         emb = self.embedding(x)
-        pos = self.position_embedding(x.size(1), batch_size=x.size(0))
+        pos = self.position_embedding(x)
         x = emb + pos
         x = self.emb_dropout(x)  # Added embedding dropout
         x = self.encoder(x)
