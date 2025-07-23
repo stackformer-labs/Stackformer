@@ -3,87 +3,122 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# --- position embedding ---
+# --- Adaptive position embedding ---
 class SinusoidalPositionalEmbedding(nn.Module):
-    def __init__(self, max_seq_len, emb_dim):
+    def __init__(self, emb_dim, max_seq_len=10000):
         super().__init__()
         self.emb_dim = emb_dim
-        position = torch.arange(0, max_seq_len).unsqueeze(1)  # (max_seq_len, 1)
-        div_term = torch.exp(torch.arange(0, emb_dim, 2) * -(math.log(10000.0) / emb_dim))  # (emb_dim/2)
-        pe = torch.zeros(max_seq_len, emb_dim)
+        self.max_seq_len = max_seq_len
+        
+        # Create initial positional encoding matrix
+        self._create_pe_matrix(max_seq_len, emb_dim)
+    
+    def _create_pe_matrix(self, seq_len, emb_dim):
+        """Create positional encoding matrix for given sequence length and embedding dimension"""
+        position = torch.arange(0, seq_len).unsqueeze(1).float()  # (seq_len, 1)
+        div_term = torch.exp(torch.arange(0, emb_dim, 2).float() * 
+                           -(math.log(10000.0) / emb_dim))  # (emb_dim//2)
+        
+        pe = torch.zeros(seq_len, emb_dim)
         pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        self.register_buffer("pe", pe)  # [max_seq_len, emb_dim]
+        if emb_dim % 2 == 1:
+            pe[:, 1::2] = torch.cos(position * div_term[:-1])
+        else:
+            pe[:, 1::2] = torch.cos(position * div_term)
+        
+        self.register_buffer("pe", pe)  # [seq_len, emb_dim]
+    
     def forward(self, x):
-        B, T = x.shape
-        return self.pe[:T].unsqueeze(0).expand(B, T, -1)
+        """
+        Args:
+            x: Input tensor of shape (batch_size, seq_len) or (batch_size, seq_len, emb_dim)
+        Returns:
+            Positional embeddings of shape (batch_size, seq_len, emb_dim)
+        """
+        if x.dim() == 2:
+            batch_size, seq_len = x.shape
+        elif x.dim() == 3:
+            batch_size, seq_len, _ = x.shape
+        else:
+            raise ValueError(f"Input tensor must be 2D or 3D, got {x.dim()}D")
+        
+        # Check if we need to extend the positional encoding
+        if seq_len > self.pe.size(0):
+            self._create_pe_matrix(seq_len, self.emb_dim)
+            # Move to the same device as input
+            self.pe = self.pe.to(x.device)
+        
+        # Return positional embeddings for the current sequence length
+        pos_emb = self.pe[:seq_len].unsqueeze(0).expand(batch_size, seq_len, -1)
+        return pos_emb.to(x.device)
 
 
 # --- Multi Head Attention ---
-class MultiHeadAttention(nn.Module):  # Fixed typo
-    def __init__(self, Emb_dim, num_heads, dropout, device='cpu', dtype=torch.float32):
+class MultiHeadAttention(nn.Module):
+    def __init__(self, emb_dim, num_heads, dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
-        assert Emb_dim % num_heads == 0, "Emb_dim must be divisible by num_heads"
-        self.Emb_dim = Emb_dim
+        assert emb_dim % num_heads == 0, "emb_dim must be divisible by num_heads"
+        self.emb_dim = emb_dim
         self.device = device
         self.num_heads = num_heads
-        self.head_dim = Emb_dim // num_heads
+        self.head_dim = emb_dim // num_heads
 
-        self.key = nn.Linear(Emb_dim, Emb_dim, bias=False, dtype=dtype, device=device)
-        self.query = nn.Linear(Emb_dim, Emb_dim, bias=False, dtype=dtype, device=device)
-        self.value = nn.Linear(Emb_dim, Emb_dim, bias=False, dtype=dtype, device=device)
+        self.key = nn.Linear(emb_dim, emb_dim, bias=False, dtype=dtype, device=device)
+        self.query = nn.Linear(emb_dim, emb_dim, bias=False, dtype=dtype, device=device)
+        self.value = nn.Linear(emb_dim, emb_dim, bias=False, dtype=dtype, device=device)
         
-        self.scale = torch.tensor(self.head_dim ** 0.5, device=device, dtype=dtype)
-        self.out_proj = nn.Linear(Emb_dim, Emb_dim, dtype=dtype, device=device)
+        self.scale = math.sqrt(self.head_dim)
+        self.out_proj = nn.Linear(emb_dim, emb_dim, dtype=dtype, device=device)
         
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x):  # Fixed parameter name
-        Batch_size, Seq_len, _ = x.shape
+    def forward(self, x):
+        batch_size, seq_len, _ = x.shape
         
         # Generate Q, K, V and reshape for multi-head attention
-        Keys = self.key(x).view(Batch_size, Seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-        Querys = self.query(x).view(Batch_size, Seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-        Values = self.value(x).view(Batch_size, Seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        keys = self.key(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        queries = self.query(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        values = self.value(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
 
         # Compute attention scores
-        scores = (Querys @ Keys.transpose(-2, -1)) / self.scale
+        scores = (queries @ keys.transpose(-2, -1)) / self.scale
 
-        causal_mask = torch.triu(torch.ones(Seq_len, Seq_len, dtype=torch.bool, device=self.device), diagonal=1)
-        scores = scores.masked_fill_(causal_mask[None, None, :, :], float('-inf'))
+        # Create causal mask dynamically based on current sequence length
+        causal_mask = torch.triu(torch.ones(seq_len, seq_len, dtype=torch.bool, device=x.device), diagonal=1)
+        scores = scores.masked_fill(causal_mask[None, None, :, :], float('-inf'))
 
         # Apply softmax and dropout
         attn = F.softmax(scores, dim=-1)
         attn = self.dropout(attn)
 
         # Apply attention to values
-        out = attn @ Values
+        out = attn @ values
         
         # Concatenate heads and project
-        out = out.transpose(1, 2).contiguous().view(Batch_size, Seq_len, self.Emb_dim)
+        out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, self.emb_dim)
         
         return self.out_proj(out)
 
 # --- Feed Forward ---
 class FF_ReLU(nn.Module):
-    def __init__(self, Emb_dim, hidden_dim, dropout=0.1, device='cpu', dtype=torch.float32):
+    def __init__(self, emb_dim, hidden_dim, dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
-        self.relu = nn.Sequential(
-            nn.Linear(Emb_dim, hidden_dim, device=device, dtype=dtype),
+        self.net = nn.Sequential(
+            nn.Linear(emb_dim, hidden_dim, device=device, dtype=dtype),
             nn.ReLU(),
-            nn.Dropout(dropout),  # Added dropout
-            nn.Linear(hidden_dim, Emb_dim, device=device, dtype=dtype),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, emb_dim, device=device, dtype=dtype),
         )
     
     def forward(self, x):
-        return self.relu(x)
+        return self.net(x)
 
 class LayerNorm(nn.Module):
-    def __init__(self, Emb_dim, eps=1e-5, device='cpu', dtype=torch.float32):
+    def __init__(self, emb_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
         self.eps = eps
-        self.weight = nn.Parameter(torch.ones(Emb_dim, device=device, dtype=dtype))
-        self.bias = nn.Parameter(torch.zeros(Emb_dim, device=device, dtype=dtype))
+        self.weight = nn.Parameter(torch.ones(emb_dim, device=device, dtype=dtype))
+        self.bias = nn.Parameter(torch.zeros(emb_dim, device=device, dtype=dtype))
 
     def forward(self, x):
         mean = x.mean(dim=-1, keepdim=True)
@@ -91,14 +126,14 @@ class LayerNorm(nn.Module):
         norm_x = (x - mean) / torch.sqrt(var + self.eps)
         return norm_x * self.weight + self.bias
 
-# --- single block --- FIXED TO PRE-NORM
-class Block(nn.Module):  # Capitalized class name
-    def __init__(self, Emb_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
+# --- Transformer Block ---
+class Block(nn.Module):
+    def __init__(self, emb_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
-        self.attention = MultiHeadAttention(Emb_dim, num_heads, dropout, device=device, dtype=dtype)
-        self.norm1 = LayerNorm(Emb_dim, eps=eps, device=device, dtype=dtype)
-        self.ff_relu = FF_ReLU(Emb_dim, hidden_dim, dropout, device=device, dtype=dtype)
-        self.norm2 = LayerNorm(Emb_dim, eps=eps, device=device, dtype=dtype)
+        self.attention = MultiHeadAttention(emb_dim, num_heads, dropout, device=device, dtype=dtype)
+        self.norm1 = LayerNorm(emb_dim, eps=eps, device=device, dtype=dtype)
+        self.ff_relu = FF_ReLU(emb_dim, hidden_dim, dropout, device=device, dtype=dtype)
+        self.norm2 = LayerNorm(emb_dim, eps=eps, device=device, dtype=dtype)
         
     def forward(self, x):
         # Pre-norm: normalize before attention
@@ -117,10 +152,10 @@ class Block(nn.Module):  # Capitalized class name
 
 # --- Encoder ---
 class Encoder(nn.Module):
-    def __init__(self, num_layers, Emb_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
+    def __init__(self, num_layers, emb_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
         self.layers = nn.ModuleList([
-            Block(Emb_dim, num_heads, dropout, hidden_dim, eps, device=device, dtype=dtype)
+            Block(emb_dim, num_heads, dropout, hidden_dim, eps, device=device, dtype=dtype)
             for _ in range(num_layers)
         ])
         
@@ -136,24 +171,27 @@ class GPTModel(nn.Module):
         self.device = device
         self.vocab_size = vocab_size
         
-        if config['dtype'] == 'float16':
+        if config.get('dtype') == 'float16':
             self.dtype = torch.float16
         else:
             self.dtype = torch.float32
         
         # --- Token embedding ---
-        self.embedding = nn.Embedding(vocab_size, config['Emb_dim'], dtype=self.dtype, device=self.device)
+        self.embedding = nn.Embedding(vocab_size, config['emb_dim'], dtype=self.dtype, device=self.device)
         
         # --- Embedding dropout ---
         self.emb_dropout = nn.Dropout(config.get('dropout', 0.1))
         
-        # --- position embedding ---
-        self.position_embedding = SinusoidalPositionalEmbedding(config['seq_len'], config['Emb_dim'])
+        # --- Adaptive position embedding ---
+        self.position_embedding = SinusoidalPositionalEmbedding(
+            config['emb_dim'], 
+            max_seq_len=config.get('max_seq_len', config.get('seq_len', 2048))
+        )
 
-        #  --- Encoder ---
+        # --- Encoder ---
         self.encoder = Encoder(
             num_layers=config['num_layers'],
-            Emb_dim=config['Emb_dim'],
+            emb_dim=config['emb_dim'],
             num_heads=config['num_heads'],
             dropout=config.get('dropout', 0.1),
             hidden_dim=config['hidden_dim'],
@@ -163,18 +201,19 @@ class GPTModel(nn.Module):
         )
         
         # --- Final norm        
-        self.final_norm = LayerNorm(config['Emb_dim'], eps=config.get('eps', 1e-5),
+        self.final_norm = LayerNorm(config['emb_dim'], eps=config.get('eps', 1e-5),
                             device=self.device, dtype=self.dtype)
         
         # --- Output Projection ---
-        self.lm_head = nn.Linear(config['Emb_dim'], vocab_size, bias=False, 
+        self.lm_head = nn.Linear(config['emb_dim'], vocab_size, bias=False, 
                     dtype=self.dtype, device=self.device)
     
     def forward(self, x):
-        emb = self.embedding(x)
-        pos = self.position_embedding(x)
+        # x shape: (batch_size, seq_len)
+        emb = self.embedding(x)  # (batch_size, seq_len, emb_dim)
+        pos = self.position_embedding(x)  # (batch_size, seq_len, emb_dim)
         x = emb + pos
-        x = self.emb_dropout(x)  # Added embedding dropout
+        x = self.emb_dropout(x)
         x = self.encoder(x)
         x = self.final_norm(x)
         x = self.lm_head(x)
@@ -185,14 +224,20 @@ class GPTModel(nn.Module):
         self.eval()
 
         if prompt_ids.dim() == 1:
-            prompt_ids = prompt_ids.unsqueeze(0)  # (1, T)
+            prompt_ids = prompt_ids.unsqueeze(0)  # (1, seq_len)
 
         generated = prompt_ids.clone()
+        max_context_len = self.config.get('max_seq_len', self.config.get('seq_len', 2048))
 
         for _ in range(max_new_tokens):
-            input_ids = generated[:, -self.config['seq_len']:]
-            logits = self.forward(input_ids)  # (B, T, vocab_size)
-            logits = logits[:, -1, :]  # (B, vocab_size)
+            # Use sliding window if sequence gets too long
+            if generated.size(1) > max_context_len:
+                input_ids = generated[:, -max_context_len:]
+            else:
+                input_ids = generated
+                
+            logits = self.forward(input_ids)  # (batch_size, seq_len, vocab_size)
+            logits = logits[:, -1, :]  # (batch_size, vocab_size)
 
             # Temperature scaling
             if temperature != 1.0:
@@ -220,7 +265,7 @@ class GPTModel(nn.Module):
 
             # Sample next token
             probs = F.softmax(logits, dim=-1)
-            next_token = torch.multinomial(probs, num_samples=1)  # (B, 1)
+            next_token = torch.multinomial(probs, num_samples=1)  # (batch_size, 1)
 
             generated = torch.cat([generated, next_token], dim=-1)
 
