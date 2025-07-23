@@ -15,8 +15,8 @@ class SinusoidalPositionalEmbedding(nn.Module):
         pe[:, 1::2] = torch.cos(position * div_term)
         self.register_buffer("pe", pe)  # [max_seq_len, emb_dim]
     def forward(self, x):
-        seq_len = x.size(1)
-        return self.pe[:seq_len].unsqueeze(0).expand(x.size(0), -1, -1)
+        B, T = x.shape
+        return self.pe[:T].unsqueeze(0).expand(B, T, -1)
 
 
 # --- Multi Head Attention ---
@@ -170,7 +170,7 @@ class GPTModel(nn.Module):
         self.lm_head = nn.Linear(config['Emb_dim'], vocab_size, bias=False, 
                     dtype=self.dtype, device=self.device)
     
-    def forward(self, x, batch_size=None):
+    def forward(self, x):
         emb = self.embedding(x)
         pos = self.position_embedding(x)
         x = emb + pos
