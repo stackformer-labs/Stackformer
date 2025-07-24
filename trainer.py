@@ -1,6 +1,6 @@
 import torch
 import os
-from torch.utils.data import DataLoader
+from torch.utils.data import Dataset, DataLoader
 from torch.optim import AdamW, SGD
 from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR, CosineAnnealingWarmRestarts
 from transformers import get_linear_schedule_with_warmup, get_cosine_schedule_with_warmup, get_cosine_with_hard_restarts_schedule_with_warmup
@@ -9,18 +9,20 @@ from tqdm import tqdm
 class Trainer:
     def __init__(self,
                 model,
-                train_dataset,
-                eval_dataset,
-                train_batch_size,
-                eval_batch_size,
-                output_dir,
-                num_epoch,
+                train_dataset: Dataset,
+                eval_dataset: Dataset,
+                train_batch_size: int,
+                eval_batch_size: int,
+                output_dir: str,
+                num_epoch: int,
                 lr: float,
                 scheduler_type=None, 
                 optimizer_type="adamw",
                 weight_decay=0.01, 
                 warmup_steps=0,
-                grad_accumulation_step=1, 
+                grad_accumulation_step=1,
+                eval_every_n_epochs=1,
+                eval_every_n_steps=None,
                 max_eval_step=None,
                 max_steps=None,
                 Save_step=None,
@@ -38,6 +40,8 @@ class Trainer:
         self.num_epoch = num_epoch
         self.max_steps = max_steps
         self.max_epoch = max_epoch
+        self.eval_every_n_epochs = eval_every_n_epochs
+        self.eval_every_n_steps = eval_every_n_steps
         self.max_eval_step = max_eval_step
         self.lr = lr
         self.scheduler_type = scheduler_type
@@ -262,6 +266,10 @@ class Trainer:
                     global_step += 1
                     accumulated_steps = 0
                 
+                # if self.eval_every_n_steps is not None and global_step % self.eval_every_n_steps == 0:
+                #     avg_eval_loss = self.eval_model(model, eval_loader, self.max_eval_step)
+                #     print(f"Eval loss: {avg_eval_loss:.4f}")
+                
                 # Check max steps
                 if self.max_steps is not None and global_step >= self.max_steps:
                     self.save_model(
@@ -296,9 +304,10 @@ class Trainer:
             avg_epoch_loss = epoch_loss / len(train_loader)
             print(f"Epoch {epoch+1} finished - Training Loss: {avg_epoch_loss:.4f}")
             
-            # Evaluation
-            avg_eval_loss = self.eval_model(model, eval_loader, self.max_eval_step)
-            print(f"Eval loss: {avg_eval_loss:.4f}")
+            # crr_epoch = epoch+1
+            # if epoch % self.eval_every_n_epochs == 0 or crr_epoch == self.num_epoch:
+            #     avg_eval_loss = self.eval_model(model, eval_loader, self.max_eval_step)
+            #     print(f"Eval loss: {avg_eval_loss:.4f}")
             
             # Check max epoch
             if self.max_epoch is not None and (epoch+1) == self.max_epoch:

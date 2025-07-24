@@ -1,5 +1,5 @@
 [project]
-name = "stackformer"
+name = "Stackformer"
 version = "0.0.1"
 description = "Modular transformer blocks built in PyTorch"
 readme = "README.md"
