@@ -3,55 +3,26 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# --- Adaptive position embedding ---
+# --- position embedding ---
 class SinusoidalPositionalEmbedding(nn.Module):
-    def __init__(self, emb_dim, max_seq_len=10000):
+    def __init__(self, seq_len, emb_dim):
         super().__init__()
+        self.seq_len = seq_len
         self.emb_dim = emb_dim
-        self.max_seq_len = max_seq_len
-        
-        # Create initial positional encoding matrix
-        self._create_pe_matrix(max_seq_len, emb_dim)
-    
-    def _create_pe_matrix(self, seq_len, emb_dim):
-        """Create positional encoding matrix for given sequence length and embedding dimension"""
-        position = torch.arange(0, seq_len).unsqueeze(1).float()  # (seq_len, 1)
-        div_term = torch.exp(torch.arange(0, emb_dim, 2).float() * 
-                           -(math.log(10000.0) / emb_dim))  # (emb_dim//2)
-        
+
+        position = torch.arange(0, seq_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, emb_dim, 2) * -(math.log(10000.0) / emb_dim))
+
         pe = torch.zeros(seq_len, emb_dim)
         pe[:, 0::2] = torch.sin(position * div_term)
-        if emb_dim % 2 == 1:
-            pe[:, 1::2] = torch.cos(position * div_term[:-1])
-        else:
-            pe[:, 1::2] = torch.cos(position * div_term)
-        
-        self.register_buffer("pe", pe)  # [seq_len, emb_dim]
-    
-    def forward(self, x):
-        """
-        Args:
-            x: Input tensor of shape (batch_size, seq_len) or (batch_size, seq_len, emb_dim)
-        Returns:
-            Positional embeddings of shape (batch_size, seq_len, emb_dim)
-        """
-        if x.dim() == 2:
-            batch_size, seq_len = x.shape
-        elif x.dim() == 3:
-            batch_size, seq_len, _ = x.shape
-        else:
-            raise ValueError(f"Input tensor must be 2D or 3D, got {x.dim()}D")
-        
-        # Check if we need to extend the positional encoding
-        if seq_len > self.pe.size(0):
-            self._create_pe_matrix(seq_len, self.emb_dim)
-            # Move to the same device as input
-            self.pe = self.pe.to(x.device)
-        
-        # Return positional embeddings for the current sequence length
-        pos_emb = self.pe[:seq_len].unsqueeze(0).expand(batch_size, seq_len, -1)
-        return pos_emb.to(x.device)
+        pe[:, 1::2] = torch.cos(position * div_term)
 
+        self.register_buffer("pe", pe)
+
+    def forward(self, x):
+        # x shape: (batch_size, seq_len, emb_dim) or (batch_size, seq_len)
+        batch_size, seq_len = x.shape[0], x.shape[1]
+        return self.pe[:seq_len].unsqueeze(0).expand(batch_size, seq_len, -1).to(x.device)
 
 # --- Multi Head Attention ---
 class MultiHeadAttention(nn.Module):
@@ -165,47 +136,40 @@ class Encoder(nn.Module):
         return x
 
 class GPTModel(nn.Module):
-    def __init__(self, config, vocab_size, device='cpu'):
+    def __init__(self, vocab_size, num_layers, Emb_dim, num_heads, seq_len,
+            dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
+        
         super().__init__()
-        self.config = config
-        self.device = device
-        self.vocab_size = vocab_size
-        
-        if config.get('dtype') == 'float16':
-            self.dtype = torch.float16
-        else:
-            self.dtype = torch.float32
-        
         # --- Token embedding ---
-        self.embedding = nn.Embedding(vocab_size, config['Emb_dim'], dtype=self.dtype, device=self.device)
+        self.embedding = nn.Embedding(vocab_size, Emb_dim, dtype=self.dtype, device=self.device)
         
         # --- Embedding dropout ---
-        self.emb_dropout = nn.Dropout(config.get('dropout', 0.1))
+        self.emb_dropout = nn.Dropout(dropout)
         
         # --- Adaptive position embedding ---
         self.position_embedding = SinusoidalPositionalEmbedding(
-            config['Emb_dim'], 
-            max_seq_len=config.get('max_seq_len', config.get('seq_len', 2048))
+            emb_dim=Emb_dim, 
+            seq_len=seq_len
         )
 
         # --- Encoder ---
         self.encoder = Encoder(
-            num_layers=config['num_layers'],
-            Emb_dim=config['Emb_dim'],
-            num_heads=config['num_heads'],
-            dropout=config.get('dropout', 0.1),
-            hidden_dim=config['hidden_dim'],
-            eps=config.get('eps', 1e-5),
+            num_layers=num_layers,
+            Emb_dim=Emb_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+            hidden_dim=hidden_dim,
+            eps=eps,
             device=self.device,
             dtype=self.dtype
         )
         
         # --- Final norm        
-        self.final_norm = LayerNorm(config['Emb_dim'], eps=config.get('eps', 1e-5),
+        self.final_norm = LayerNorm(Emb_dim, eps=eps,
                             device=self.device, dtype=self.dtype)
         
         # --- Output Projection ---
-        self.lm_head = nn.Linear(config['Emb_dim'], vocab_size, bias=False, 
+        self.lm_head = nn.Linear(Emb_dim, vocab_size, bias=False, 
                     dtype=self.dtype, device=self.device)
     
     def forward(self, x):
@@ -218,16 +182,15 @@ class GPTModel(nn.Module):
         x = self.final_norm(x)
         x = self.lm_head(x)
         return x
-    
+        
     @torch.no_grad()
-    def generate(self, prompt_ids, max_new_tokens=50, temperature=1.0, top_k=None, top_p=1.0):
+    def generate(self, prompt_ids, max_new_tokens=50, temperature=1.0, top_k=None, top_p=1.0, eos_token_id=None):
         self.eval()
-
         if prompt_ids.dim() == 1:
             prompt_ids = prompt_ids.unsqueeze(0)  # (1, seq_len)
-
+            
         generated = prompt_ids.clone()
-        max_context_len = self.config.get('max_seq_len', self.config.get('seq_len', 2048))
+        max_context_len = self.seq_len
 
         for _ in range(max_new_tokens):
             # Use sliding window if sequence gets too long
@@ -239,18 +202,18 @@ class GPTModel(nn.Module):
             logits = self.forward(input_ids)  # (batch_size, seq_len, vocab_size)
             logits = logits[:, -1, :]  # (batch_size, vocab_size)
 
-            # Temperature scaling
+            # --- Temperature scaling ---
             if temperature != 1.0:
                 logits = logits / temperature
 
-            # Top-k filtering
+            # --- Top-k filtering ---
             if top_k is not None and top_k > 0:
                 topk_vals, topk_indices = torch.topk(logits, top_k)
                 mask = torch.full_like(logits, float('-inf'))
                 mask.scatter_(dim=-1, index=topk_indices, src=topk_vals)
                 logits = mask
 
-            # Top-p (nucleus) filtering
+            # --- Top-p ---
             if top_p < 1.0:
                 sorted_logits, sorted_indices = torch.sort(logits, descending=True, dim=-1)
                 probs = F.softmax(sorted_logits, dim=-1)
@@ -266,7 +229,10 @@ class GPTModel(nn.Module):
             # Sample next token
             probs = F.softmax(logits, dim=-1)
             next_token = torch.multinomial(probs, num_samples=1)  # (batch_size, 1)
-
             generated = torch.cat([generated, next_token], dim=-1)
+
+            # check if we've reached the end of the sequence
+            if eos_token_id is not None and next_token.item() == eos_token_id:
+                break
 
         return generated
