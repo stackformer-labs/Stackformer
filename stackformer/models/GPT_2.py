@@ -138,8 +138,9 @@ class Encoder(nn.Module):
 class GPTModel(nn.Module):
     def __init__(self, vocab_size, num_layers, Emb_dim, num_heads, seq_len,
             dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
-        
         super().__init__()
+        self.device = device
+        self.dtype = dtype
         # --- Token embedding ---
         self.embedding = nn.Embedding(vocab_size, Emb_dim, dtype=self.dtype, device=self.device)
         
