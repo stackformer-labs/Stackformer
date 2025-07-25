@@ -413,7 +413,7 @@ class kv_cache_multihead(nn.Module):
         self.dtype = dtype
         self.device = device
         
-        assert emb_dim % num_heads == 0
+        assert emb_dim % num_heads == 0, "emb_dim must be divisible by num_heads"
         self.emb_dim = emb_dim
         self.num_heads = num_heads
         self.head_dim = emb_dim // num_heads
@@ -425,9 +425,9 @@ class kv_cache_multihead(nn.Module):
         
         self.out_proj = nn.Linear(emb_dim, emb_dim, dtype=dtype, device=device)
         self.dropout = nn.Dropout(dropout)
-
-        self.cache_keys = torch.zeros(batch_size, kv_seq_len, num_heads, self.head_dim,dtype=dtype,device=device)
-        self.cache_value = torch.zeros(batch_size, kv_seq_len, num_heads, self.head_dim,dtype=dtype,device=device)
+        # KV caches
+        self.register_buffer("cache_keys", torch.zeros(batch_size, kv_seq_len*2, num_heads, self.head_dim,device=device,dtype=dtype))
+        self.register_buffer("cache_value", torch.zeros(batch_size, kv_seq_len*2, num_heads, self.head_dim,device=device,dtype=dtype))
 
     def forward(self, x, start_pos, RoPE=False):
         batch_size, seq_len, C = x.shape
@@ -465,12 +465,12 @@ class kv_cache_multihead(nn.Module):
         return self.dropout(self.out_proj(out))
 
 class kv_cache_group_query(nn.Module):
-    def __init__(self, emb_dim, query_num_heads, kv_num_heads, batch_size, kv_seq_len,device='cpu' , dtype=torch.float32 , dropout=0.1):
+    def __init__(self, emb_dim, query_num_heads, kv_num_heads, batch_size, kv_seq_len, device='cpu', dtype=torch.float32, dropout=0.1):
         super().__init__()
         self.dtype = dtype
         self.device = device
         
-        assert query_num_heads % kv_num_heads == 0, "query heads must be divisible by kv heads"
+        assert query_num_heads % kv_num_heads  == 0, "query heads must be divisible by kv heads"
         assert emb_dim % query_num_heads == 0, "embedding must be divisible by query heads"
 
         self.emb_dim = emb_dim
@@ -488,8 +488,8 @@ class kv_cache_group_query(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
         # KV caches
-        self.register_buffer("cache_keys", torch.zeros(batch_size, kv_seq_len, kv_num_heads, self.head_dim,device=device,dtype=dtype))
-        self.register_buffer("cache_value", torch.zeros(batch_size, kv_seq_len, kv_num_heads, self.head_dim,device=device,dtype=dtype))
+        self.register_buffer("cache_keys", torch.zeros(batch_size, kv_seq_len*2, kv_num_heads, self.head_dim,device=device,dtype=dtype))
+        self.register_buffer("cache_value", torch.zeros(batch_size, kv_seq_len*2, kv_num_heads, self.head_dim,device=device,dtype=dtype))
         
     def forward(self, x, start_pos, RoPE=False):
         batch_size, seq_len, _ = x.shape
@@ -501,15 +501,16 @@ class kv_cache_group_query(nn.Module):
         if RoPE:
             freq_q = precompute_theta_position_frequency(head_dim=self.head_dim, seq_len=seq_len, device=self.device)
             xq = apply_rotry_position_embedding(xq, freq_q, device=self.device, dtype=self.dtype)
-            freq_k = precompute_theta_position_frequency(head_dim=self.head_dim, seq_len=self.kv_seq_len, device=self.device)
+            freq_k = precompute_theta_position_frequency(head_dim=self.head_dim, seq_len=seq_len, device=self.device)
             xk = apply_rotry_position_embedding(xk, freq_k, device=self.device, dtype=self.dtype)
-        # Cache
-        self.cache_keys[:, start_pos:start_pos+seq_len] = xk
-        self.cache_value[:, start_pos:start_pos+seq_len] = xv
 
-        xk_full = self.cache_keys[:, :start_pos+seq_len]  # [B, T, kv_heads, D]
-        xv_full = self.cache_value[:, :start_pos+seq_len]
-
+        # Cache keys and values - only update the batch_size portion we're using
+        self.cache_keys[:batch_size, start_pos:start_pos+seq_len] = xk
+        self.cache_value[:batch_size, start_pos:start_pos+seq_len] = xv
+        # Only use the relevant batch portion from cache
+        xk_full = self.cache_keys[:batch_size, :start_pos+seq_len]
+        xv_full = self.cache_value[:batch_size, :start_pos+seq_len]
+        
         # Transpose for attention: [B, H, T, D]
         query = xq.transpose(1, 2)  # [B, q_heads, seq_len, D]
         key = xk_full.transpose(1, 2)  # [B, kv_heads, total_kv_len, D]
@@ -518,16 +519,14 @@ class kv_cache_group_query(nn.Module):
         # Repeat keys and values to match query heads
         key = key.repeat_interleave(self.num_queries_per_kv, dim=1)
         value = value.repeat_interleave(self.num_queries_per_kv, dim=1)
-
         # Attention
         attn_scores = torch.matmul(query, key.transpose(2, 3)) / (self.head_dim ** 0.5)
-        
         # Causal mask
-        causal_mask = torch.triu(torch.ones(seq_len, seq_len, dtype=torch.bool, device=self.device), diagonal=1)
+        causal_mask = torch.triu(torch.ones(attn_scores.shape[-2], attn_scores.shape[-1], dtype=torch.bool, device=self.device), diagonal=1)
         attn_scores.masked_fill_(causal_mask[None, None, :, :], float('-inf'))
-        
+        #softmax
         attn_weights = F.softmax(attn_scores, dim=-1)
+        # atten weight @ value
         out = torch.matmul(attn_weights, value)
-
         out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, self.emb_dim)
         return self.dropout(self.out_proj(out))
