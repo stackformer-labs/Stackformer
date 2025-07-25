@@ -40,11 +40,16 @@ stackformer/ \
 
 ## 💻 Installation
 
-Clone the repository and install in development mode:
+✅ Method 1: Install from PyPI:
+```bash
+pip install Stackformer
+import stackformer
+```
 
+🔧 Method 2: Clone the repository:
 ```bash
 git clone https://github.com/Gurumurthy30/Stackformer
-cd transformers
+cd Stackformer
 pip install -e .
 ```
 
