@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 class Self_Attention(nn.Module):
     def __init__(self, Emb_dim, dropout,dtype=torch.float32,device='cpu'):
         super().__init__()
@@ -418,17 +419,17 @@ class kv_cache_multihead(nn.Module):
         self.head_dim = emb_dim // num_heads
         self.kv_seq_len = kv_seq_len
 
-        self.query = nn.Linear(emb_dim, emb_dim, bias=False,dtype=dtype,device=device)
-        self.key = nn.Linear(emb_dim, emb_dim, bias=False,dtype=dtype,device=device)
-        self.value = nn.Linear(emb_dim, emb_dim, bias=False,dtype=dtype,device=device)
+        self.query = nn.Linear(emb_dim, emb_dim, bias=False, dtype=dtype, device=device)
+        self.key = nn.Linear(emb_dim, emb_dim, bias=False, dtype=dtype, device=device)
+        self.value = nn.Linear(emb_dim, emb_dim, bias=False, dtype=dtype, device=device)
         
-        self.out_proj = nn.Linear(emb_dim, emb_dim,dtype=dtype,device=device)
+        self.out_proj = nn.Linear(emb_dim, emb_dim, dtype=dtype, device=device)
         self.dropout = nn.Dropout(dropout)
 
         self.cache_keys = torch.zeros(batch_size, kv_seq_len, num_heads, self.head_dim,dtype=dtype,device=device)
         self.cache_value = torch.zeros(batch_size, kv_seq_len, num_heads, self.head_dim,dtype=dtype,device=device)
 
-    def forward(self, x, start_pos, RoPE: False):
+    def forward(self, x, start_pos, RoPE=False):
         batch_size, seq_len, C = x.shape
         
         xq = self.query(x).view(batch_size, seq_len, self.num_heads, self.head_dim)
@@ -441,26 +442,25 @@ class kv_cache_multihead(nn.Module):
             freq_complex = precompute_theta_position_frequency(head_dim=self.head_dim, seq_len=self.kv_seq_len, device=self.device)
             xk = apply_rotry_position_embedding(xk, freq_complex, device=self.device, dtype=self.dtype)
         
-        # Cache keys and values
-        self.cache_keys[:, start_pos:start_pos+seq_len] = xk
-        self.cache_value[:, start_pos:start_pos+seq_len] = xv
+        # Cache keys and values - only update the batch_size portion we're using
+        self.cache_keys[:batch_size, start_pos:start_pos+seq_len] = xk
+        self.cache_value[:batch_size, start_pos:start_pos+seq_len] = xv
 
-        xk_full = self.cache_keys[:, :start_pos+seq_len]
-        xv_full = self.cache_value[:, :start_pos+seq_len]
-
+        # Only use the relevant batch portion from cache
+        xk_full = self.cache_keys[:batch_size, :start_pos+seq_len]
+        xv_full = self.cache_value[:batch_size, :start_pos+seq_len]
+        
         query = xq.transpose(1, 2)         # (batch_size, num_head, seq_len, emb_dim)
         key = xk_full.transpose(1, 2)    # (batch_size, num_head, T_total, emb_dim)
         value = xv_full.transpose(1, 2)    # (batch_size, num_head, T_total, emb_dim)
                 
         attn_scores = torch.matmul(query, key.transpose(2, 3)) / (self.head_dim ** 0.5)
-        
         # Causal mask
-        causal_mask = torch.triu(torch.ones(seq_len, seq_len, dtype=torch.bool, device=self.device), diagonal=1)
+        causal_mask = torch.triu(torch.ones(attn_scores.shape[-2], attn_scores.shape[-1], dtype=torch.bool, device=self.device), diagonal=1)
         attn_scores.masked_fill_(causal_mask[None, None, :, :], float('-inf'))
         
         attn_weights = F.softmax(attn_scores, dim=-1)
         out = torch.matmul(attn_weights, value)
-
         out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, -1)
         return self.dropout(self.out_proj(out))
 
