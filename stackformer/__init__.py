@@ -30,7 +30,9 @@ from .modules.Feed_forward import FF_Sigmoid
 from .modules.Feed_forward import FF_SiLU
 
 # --- Model ---
-from .models.GPT_2 import GPTModel
+from .models.OpenAI import GPT_2
+from .models.Meta import Llama_2
+from .models.Transformer import transformer
 
 # --- Trainer ---
 from .trainer import Trainer
