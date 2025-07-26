@@ -1,5 +1,3 @@
 stackformer/datasets/
 How to update pipy.txt
-stackformer/models/Llama_2.py
-stackformer/models/Transformer.py
 stackformer/modules/mask.py
