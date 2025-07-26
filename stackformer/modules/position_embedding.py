@@ -14,7 +14,8 @@ class AbsolutePositionEmbedding(nn.Module):
         batch_size, seq_len = x.shape[0], x.shape[1]
         positions = torch.arange(0, seq_len)
         abs_pos = self.embedding(positions)  # (seq_len, emb_dim)
-        return abs_pos.unsqueeze(0).expand(batch_size, seq_len, -1).to(x.device)
+        out = abs_pos.unsqueeze(0).expand(batch_size, seq_len, -1)
+        return out.to(device=x.device,dtype=x.dtype)
 
 # --- Sinusoidal Positional Embedding ---
 class SinusoidalPositionalEmbedding(nn.Module):
@@ -35,8 +36,9 @@ class SinusoidalPositionalEmbedding(nn.Module):
     def forward(self, x):
         # x shape: (batch_size, seq_len, emb_dim) or (batch_size, seq_len)
         batch_size, seq_len = x.shape[0], x.shape[1]
-        return self.pe[:seq_len].unsqueeze(0).expand(batch_size, seq_len, -1).to(x.device)
-    
+        out = self.pe[:seq_len].unsqueeze(0).expand(batch_size, seq_len, -1)
+        return out.to(device=x.device,dtype=x.dtype)
+        
 # --- RoPE ---
 class RoPE(nn.Module):
     def __init__(self, head_dim, seq_len, theta=10000.0, device='cpu', dtype=torch.float32):
@@ -58,4 +60,4 @@ class RoPE(nn.Module):
         freqs = self.freq_complex[:seq_len].unsqueeze(0).unsqueeze(2)  # (1, seq_len, 1, head_dim//2)
         x_rotated = x_complex * freqs
         x_out = torch.view_as_real(x_rotated).contiguous().view(batch_size, seq_len, num_head, emb_dim)
-        return x_out.to(device=self.device, dtype=self.dtype)
+        return x_out.to(device=x.device, dtype=x.dtype)
