@@ -22,7 +22,8 @@ class SinusoidalPositionalEmbedding(nn.Module):
     def forward(self, x):
         # x shape: (batch_size, seq_len, emb_dim) or (batch_size, seq_len)
         batch_size, seq_len = x.shape[0], x.shape[1]
-        return self.pe[:seq_len].unsqueeze(0).expand(batch_size, seq_len, -1).to(x.device)
+        out = self.pe[:seq_len].unsqueeze(0).expand(batch_size, seq_len, -1)
+        return out.to(device=x.device,dtype=x.dtype)
 
 # --- Multi Head Attention ---
 class MultiHeadAttention(nn.Module):
@@ -141,6 +142,8 @@ class GPTModel(nn.Module):
         super().__init__()
         self.device = device
         self.dtype = dtype
+        self.seq_len = seq_len
+        
         # --- Token embedding ---
         self.embedding = nn.Embedding(vocab_size, Emb_dim, dtype=self.dtype, device=self.device)
         
