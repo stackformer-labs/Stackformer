@@ -46,7 +46,7 @@ class RoPE(nn.Module):
         self.dtype  = dtype
         self.device = device
         assert head_dim % 2 == 0, "head_dim must be even"
-        theta_numerator = torch.arange(0, head_dim, 2, device=device, dtype=dtype)
+        theta_numerator = torch.arange(0, head_dim, 2, device=device)
         inv_freq = 1.0 / (theta ** (theta_numerator / head_dim))
         m = torch.arange(seq_len, device=device)
         freqs = torch.outer(m, inv_freq)
