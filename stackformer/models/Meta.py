@@ -5,8 +5,6 @@ import torch.nn.functional as F
 from stackformer.modules.Attention import kv_cache_group_query
 from stackformer.modules.Feed_forward import FF_SiLU
 from stackformer.modules.Normalization import RMSNormilization
-from stackformer.modules.position_embedding import RoPE
-
 
 class block(nn.Module):
     def __init__(self, emb_dim, query_num_heads, kv_num_heads, batch_size, kv_seq_len, hidden_dim,
