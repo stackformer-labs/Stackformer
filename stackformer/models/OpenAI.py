@@ -3,122 +3,30 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# --- position embedding ---
-class SinusoidalPositionalEmbedding(nn.Module):
-    def __init__(self, seq_len, emb_dim):
-        super().__init__()
-        self.seq_len = seq_len
-        self.emb_dim = emb_dim
+from stackformer.modules.Attention import Multi_Head_Attention
+from stackformer.modules.position_embedding import SinusoidalPositionalEmbedding
+from stackformer.modules.Normalization import LayerNorm
+from stackformer.modules.Feed_forward import FF_ReLU
 
-        position = torch.arange(0, seq_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, emb_dim, 2) * -(math.log(10000.0) / emb_dim))
-
-        pe = torch.zeros(seq_len, emb_dim)
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-
-        self.register_buffer("pe", pe)
-
-    def forward(self, x):
-        # x shape: (batch_size, seq_len, emb_dim) or (batch_size, seq_len)
-        batch_size, seq_len = x.shape[0], x.shape[1]
-        out = self.pe[:seq_len].unsqueeze(0).expand(batch_size, seq_len, -1)
-        return out.to(device=x.device,dtype=x.dtype)
-
-# --- Multi Head Attention ---
-class MultiHeadAttention(nn.Module):
-    def __init__(self, Emb_dim, num_heads, dropout=0.1, device='cpu', dtype=torch.float32):
-        super().__init__()
-        assert Emb_dim % num_heads == 0, "Emb_dim must be divisible by num_heads"
-        self.Emb_dim = Emb_dim
-        self.device = device
-        self.num_heads = num_heads
-        self.head_dim = Emb_dim // num_heads
-
-        self.key = nn.Linear(Emb_dim, Emb_dim, bias=False, dtype=dtype, device=device)
-        self.query = nn.Linear(Emb_dim, Emb_dim, bias=False, dtype=dtype, device=device)
-        self.value = nn.Linear(Emb_dim, Emb_dim, bias=False, dtype=dtype, device=device)
-        
-        self.scale = math.sqrt(self.head_dim)
-        self.out_proj = nn.Linear(Emb_dim, Emb_dim, dtype=dtype, device=device)
-        
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, x):
-        batch_size, seq_len, _ = x.shape
-        
-        # Generate Q, K, V and reshape for multi-head attention
-        keys = self.key(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-        queries = self.query(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-        values = self.value(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-
-        # Compute attention scores
-        scores = (queries @ keys.transpose(-2, -1)) / self.scale
-
-        # Create causal mask dynamically based on current sequence length
-        causal_mask = torch.triu(torch.ones(seq_len, seq_len, dtype=torch.bool, device=x.device), diagonal=1)
-        scores = scores.masked_fill(causal_mask[None, None, :, :], float('-inf'))
-
-        # Apply softmax and dropout
-        attn = F.softmax(scores, dim=-1)
-        attn = self.dropout(attn)
-
-        # Apply attention to values
-        out = attn @ values
-        
-        # Concatenate heads and project
-        out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, self.Emb_dim)
-        
-        return self.out_proj(out)
-
-# --- Feed Forward ---
-class FF_ReLU(nn.Module):
-    def __init__(self, Emb_dim, hidden_dim, dropout=0.1, device='cpu', dtype=torch.float32):
-        super().__init__()
-        self.relu = nn.Sequential(
-            nn.Linear(Emb_dim, hidden_dim, device=device, dtype=dtype),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, Emb_dim, device=device, dtype=dtype),
-        )
-    
-    def forward(self, x):
-        return self.relu(x)
-
-class LayerNorm(nn.Module):
-    def __init__(self, Emb_dim, eps=1e-5, device='cpu', dtype=torch.float32):
-        super().__init__()
-        self.eps = eps
-        self.weight = nn.Parameter(torch.ones(Emb_dim, device=device, dtype=dtype))
-        self.bias = nn.Parameter(torch.zeros(Emb_dim, device=device, dtype=dtype))
-
-    def forward(self, x):
-        mean = x.mean(dim=-1, keepdim=True)
-        var = x.var(dim=-1, keepdim=True, unbiased=False)
-        norm_x = (x - mean) / torch.sqrt(var + self.eps)
-        return norm_x * self.weight + self.bias
-
-# --- Transformer Block ---
+# --- Encoder Block ---
 class Block(nn.Module):
     def __init__(self, Emb_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
-        self.attention = MultiHeadAttention(Emb_dim, num_heads, dropout, device=device, dtype=dtype)
+        self.attention = Multi_Head_Attention(Emb_dim, num_heads, dropout, device=device, dtype=dtype)
         self.norm1 = LayerNorm(Emb_dim, eps=eps, device=device, dtype=dtype)
         self.ff_relu = FF_ReLU(Emb_dim, hidden_dim, dropout, device=device, dtype=dtype)
         self.norm2 = LayerNorm(Emb_dim, eps=eps, device=device, dtype=dtype)
         
     def forward(self, x):
-        # Pre-norm: normalize before attention
         residual = x
-        x = self.norm1(x)
         x = self.attention(x)
-        x = x + residual  # Residual connection
+        x = self.norm1(x)
+        x = x + residual
         
-        # Pre-norm: normalize before FF
         residual = x
-        x = self.norm2(x)
         x = self.ff_relu(x)
-        x = x + residual  # Residual connection
+        x = self.norm2(x)
+        x = x + residual
         
         return x
 
