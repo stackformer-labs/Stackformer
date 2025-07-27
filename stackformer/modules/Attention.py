@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from stackformer.modules.position_embedding import RoPE
+
 class Self_Attention(nn.Module):
     def __init__(self, Emb_dim, dropout,dtype=torch.float32,device='cpu'):
         super().__init__()
@@ -370,43 +372,6 @@ class Local_Attention(nn.Module):
         
         return self.out_proj(out)
 
-def precompute_theta_position_frequency(head_dim, seq_len, device='cpu', theta=10000.0):
-    assert head_dim % 2 == 0, "head_dim must be even"
-
-    # Frequencies: 1 / (theta ** (2i / head_dim))
-    theta_numerator = torch.arange(0, head_dim, 2, device=device)
-    inv_freq = 1.0 / (theta ** (theta_numerator / head_dim))
-
-    # Position indices
-    m = torch.arange(seq_len, device=device)
-
-    # Outer product: (seq_len, head_dim // 2)
-    freqs = torch.outer(m, inv_freq)
-
-    # Convert to complex exponential form: exp(i * freq)
-    freq_complex = torch.polar(torch.ones_like(freqs), freqs)
-    return freq_complex
-
-
-def apply_rotry_position_embedding(x, freq_complex, device='cpu', dtype=torch.float32):
-    # x: (batch_size, seq_len, num_head, emb_dim)
-    batch_size, seq_len, num_head, emb_dim = x.shape
-    assert emb_dim % 2 == 0, "emb_dim must be even"
-
-    # Reshape to split last dimension into complex pairs
-    x_reshaped = x.view(batch_size, seq_len, num_head, emb_dim // 2, 2).to(device=device, dtype=dtype)
-    x_complex = torch.view_as_complex(x_reshaped)
-
-    # Prepare frequencies: (1, seq_len, 1, emb_dim//2)
-    freq_complex = freq_complex[:seq_len].unsqueeze(0).unsqueeze(2).to(device=device)
-
-    # Apply rotation
-    x_rotated = x_complex * freq_complex
-
-    # Convert back to real tensor and reshape
-    x_out = torch.view_as_real(x_rotated).contiguous().view(batch_size, seq_len, num_head, emb_dim)
-    return x_out.to(device=device, dtype=dtype)
-
 class kv_cache_multihead(nn.Module):
     def __init__(self, emb_dim, num_heads, batch_size, kv_seq_len, device='cpu', dtype=torch.float32,dropout=0.1):
         super().__init__()        
@@ -437,10 +402,10 @@ class kv_cache_multihead(nn.Module):
         xv = self.value(x).view(batch_size, seq_len, self.num_heads, self.head_dim)
         
         if RoPE:
-            freq_complex = precompute_theta_position_frequency(head_dim=self.head_dim, seq_len=seq_len, device=self.device)
-            xq = apply_rotry_position_embedding(xq, freq_complex, device=self.device, dtype=self.dtype)
-            freq_complex = precompute_theta_position_frequency(head_dim=self.head_dim, seq_len=self.kv_seq_len, device=self.device)
-            xk = apply_rotry_position_embedding(xk, freq_complex, device=self.device, dtype=self.dtype)
+            freq_xq = RoPE(head_dim=self.head_dim, seq_len=seq_len, device=self.device, dtype=self.dtype)
+            xq = freq_xq(xq)
+            freq_xk = RoPE(head_dim=self.head_dim, seq_len=self.kv_seq_len, device=self.device, dtype=self.dtype)
+            xk = freq_xk(xk)
         
         # Cache keys and values - only update the batch_size portion we're using
         self.cache_keys[:batch_size, start_pos:start_pos+seq_len] = xk
@@ -499,10 +464,10 @@ class kv_cache_group_query(nn.Module):
         xv = self.value(x).view(batch_size, seq_len, self.kv_num_heads, self.head_dim)
 
         if RoPE:
-            freq_q = precompute_theta_position_frequency(head_dim=self.head_dim, seq_len=seq_len, device=self.device)
-            xq = apply_rotry_position_embedding(xq, freq_q, device=self.device, dtype=self.dtype)
-            freq_k = precompute_theta_position_frequency(head_dim=self.head_dim, seq_len=seq_len, device=self.device)
-            xk = apply_rotry_position_embedding(xk, freq_k, device=self.device, dtype=self.dtype)
+            freq_xq = RoPE(head_dim=self.head_dim, seq_len=seq_len, device=self.device, dtype=self.dtype)
+            xq = freq_xq(xq)
+            freq_xk = RoPE(head_dim=self.head_dim, seq_len=self.kv_seq_len, device=self.device, dtype=self.dtype)
+            xk = freq_xk(xk)
 
         # Cache keys and values - only update the batch_size portion we're using
         self.cache_keys[:batch_size, start_pos:start_pos+seq_len] = xk
