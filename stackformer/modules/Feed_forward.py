@@ -13,10 +13,11 @@ class FF_ReLU(nn.Module):
             nn.Dropout(dropout),
         )
     def forward(self,x):
-        return self.relu(x)
+        x = self.relu(x)
+        return x.to(device=x.device,dtype=x.dtype)
     
 class FF_LeakyReLU(nn.Module):
-    def __init__(self,emb_dim,hidden_dim, dropout = 0.0,negative_slope=0.1,device='cpu',dtype=torch.float32):
+    def __init__(self,emb_dim,hidden_dim, dropout = 0.0, negative_slope=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
         self.l_relu=nn.Sequential(
             nn.Linear(emb_dim,hidden_dim,device=device,dtype=dtype),
@@ -26,10 +27,11 @@ class FF_LeakyReLU(nn.Module):
             nn.Dropout(dropout),
         )
     def forward(self,x):
-        return self.l_relu(x)
+        x = self.l_relu(x)
+        return x.to(device=x.device,dtype=x.dtype)
     
 class FF_GELU(nn.Module):
-    def __init__(self,emb_dim,hidden_dim, dropout = 0.0, device='cpu',dtype=torch.float32):
+    def __init__(self,emb_dim,hidden_dim, dropout = 0.0, device='cpu', dtype=torch.float32):
         super().__init__()
         self.gelu=nn.Sequential(
             nn.Linear(emb_dim,hidden_dim,device=device,dtype=dtype),
@@ -39,10 +41,11 @@ class FF_GELU(nn.Module):
             nn.Dropout(dropout),
         )
     def forward(self,x):
-        return self.gelu(x)
+        x = self.gelu(x)
+        return x.to(device=x.device,dtype=x.dtype)
     
 class FF_Sigmoid(nn.Module):
-    def __init__(self,emb_dim,hidden_dim, dropout = 0.0, device='cpu',dtype=torch.float32):
+    def __init__(self,emb_dim,hidden_dim, dropout = 0.0, device='cpu', dtype=torch.float32):
         super().__init__()
         self.sigmoid=nn.Sequential(
             nn.Linear(emb_dim,hidden_dim,device=device,dtype=dtype),
@@ -52,7 +55,8 @@ class FF_Sigmoid(nn.Module):
             nn.Dropout(dropout),
         )
     def forward(self,x):
-        return self.sigmoid(x)
+        x = self.sigmoid(x)
+        return x.to(device=x.device,dtype=x.dtype)
     
 class FF_SiLU(nn.Module):
     def __init__(self,emb_dim,hidden_dim, dropout = 0.0, device='cpu',dtype=torch.float32):
@@ -65,5 +69,22 @@ class FF_SiLU(nn.Module):
             nn.Dropout(dropout),
         )
     def forward(self,x):
-        return self.silu(x)
+        x = self.silu(x)
+        return x.to(device=x.device,dtype=x.dtype)
+
+class FF_SwiGLU(nn.Module):
+    def __init__(self, emb_dim, hidden_dim, dropout=0.0, device='cpu', dtype=torch.float32):
+        super().__init__()
+        self.linear1 = nn.Linear(emb_dim, hidden_dim * 2, device=device, dtype=dtype)
+        self.dropout1 = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(hidden_dim, emb_dim, device=device, dtype=dtype)
+        self.dropout2 = nn.Dropout(dropout)
     
+    def forward(self, x):
+        x_proj = self.linear1(x)            
+        x1, x2 = x_proj.chunk(2, dim=-1)  
+        x = x2 * F.silu(x1)                 
+        x = self.dropout1(x)
+        x = self.linear2(x)                 
+        x = self.dropout2(x)
+        return x.to(device=x.device,dtype=x.dtype)
