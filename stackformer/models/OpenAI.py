@@ -81,7 +81,6 @@ class GPT_1(nn.Module):
         emb = self.embedding(x)  # (batch_size, seq_len, emb_dim)
         pos = self.position_embedding(x)  # (batch_size, seq_len, emb_dim)
         x = emb + pos
-        x = self.emb_dropout(x)
         x = self.encoder(x)
         x = self.final_norm(x)
         x = self.lm_head(x)
@@ -168,7 +167,6 @@ class GPT_2(nn.Module):
         emb = self.embedding(x)  # (batch_size, seq_len, emb_dim)
         pos = self.position_embedding(x)  # (batch_size, seq_len, emb_dim)
         x = emb + pos
-        x = self.emb_dropout(x)
         x = self.encoder(x)
         x = self.final_norm(x)
         x = self.lm_head(x)
