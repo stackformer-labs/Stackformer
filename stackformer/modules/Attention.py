@@ -81,6 +81,53 @@ class Multi_Head_Attention(nn.Module):
         
         return self.out_proj(out)
     
+class Multi_Head_Attention_with_RoPE(nn.Module):
+    def __init__(self, Emb_dim, num_heads, dropout, device='cpu', dtype=torch.float32):
+        super().__init__()
+        assert Emb_dim % num_heads == 0, "Emb_dim must be divisible by num_heads"
+        self.Emb_dim = Emb_dim
+        self.num_heads = num_heads
+        self.device = device
+        self.dtype = dtype
+        self.head_dim = Emb_dim // num_heads
+
+        self.key = nn.Linear(Emb_dim, Emb_dim, bias=False, dtype=dtype, device=device)
+        self.query = nn.Linear(Emb_dim, Emb_dim, bias=False, dtype=dtype, device=device)
+        self.value = nn.Linear(Emb_dim, Emb_dim, bias=False, dtype=dtype, device=device)
+
+        self.scale = torch.tensor(self.head_dim ** 0.5, device=device, dtype=dtype)
+        self.out_proj = nn.Linear(Emb_dim, Emb_dim, dtype=dtype, device=device)
+
+        self.dropout = nn.Dropout(dropout)
+
+
+    def forward(self, x):
+        Batch_size, Seq_len, _ = x.shape
+
+        Querys = self.query(x).view(Batch_size, Seq_len, self.num_heads, self.head_dim)
+        Keys = self.key(x).view(Batch_size, Seq_len, self.num_heads, self.head_dim)
+        Values = self.value(x).view(Batch_size, Seq_len, self.num_heads, self.head_dim)
+
+        # Apply RoPE
+        self.rope = RoPE(head_dim=self.head_dim, seq_len=Seq_len, device=self.device, dtype=self.dtype)
+        Querys = self.rope(Querys)
+        Keys = self.rope(Keys)
+
+        Keys = Keys.transpose(1, 2)
+        Querys = Querys.transpose(1, 2)
+        Values = Values.transpose(1, 2)
+
+        scores = (Querys @ Keys.transpose(-2, -1)) / self.scale
+        causal_mask = torch.triu(torch.ones(Seq_len, Seq_len, dtype=torch.bool, device=self.device), diagonal=1)
+        scores = scores.masked_fill_(causal_mask[None, None, :, :], float('-inf'))
+
+        attn = F.softmax(scores, dim=-1)
+        attn = self.dropout(attn)
+
+        out = attn @ Values
+        out = out.transpose(1, 2).contiguous().view(Batch_size, Seq_len, self.Emb_dim)
+        return self.out_proj(out)
+
 class Cross_MultiHead_Attention(nn.Module):
     def __init__(self, Emb_dim, num_heads, dropout,device='cpu', dtype=torch.float32):
         super().__init__()
@@ -391,11 +438,11 @@ class kv_cache_multihead(nn.Module):
         self.out_proj = nn.Linear(emb_dim, emb_dim, dtype=dtype, device=device)
         self.dropout = nn.Dropout(dropout)
         # KV caches
-        self.register_buffer("cache_keys", torch.zeros(batch_size, kv_seq_len*2, num_heads, self.head_dim,device=device,dtype=dtype))
-        self.register_buffer("cache_value", torch.zeros(batch_size, kv_seq_len*2, num_heads, self.head_dim,device=device,dtype=dtype))
+        self.cache_keys = torch.zeros(batch_size, kv_seq_len*2, num_heads, self.head_dim, device=device, dtype=dtype)
+        self.cache_value = torch.zeros(batch_size, kv_seq_len*2, num_heads, self.head_dim, device=device, dtype=dtype)
 
     def forward(self, x, start_pos, RoPE=False):
-        batch_size, seq_len, C = x.shape
+        batch_size, seq_len, _ = x.shape
         
         xq = self.query(x).view(batch_size, seq_len, self.num_heads, self.head_dim)
         xk = self.key(x).view(batch_size, seq_len, self.num_heads, self.head_dim)
@@ -408,12 +455,11 @@ class kv_cache_multihead(nn.Module):
             xk = freq_xk(xk)
         
         # Cache keys and values - only update the batch_size portion we're using
-        self.cache_keys[:batch_size, start_pos:start_pos+seq_len] = xk
-        self.cache_value[:batch_size, start_pos:start_pos+seq_len] = xv
-
+        self.cache_keys[:batch_size, start_pos:start_pos+seq_len] = xk.detach()
+        self.cache_value[:batch_size, start_pos:start_pos+seq_len] = xv.detach()
         # Only use the relevant batch portion from cache
-        xk_full = self.cache_keys[:batch_size, :start_pos+seq_len]
-        xv_full = self.cache_value[:batch_size, :start_pos+seq_len]
+        xk_full = self.cache_keys[:batch_size, :start_pos+seq_len].detach()
+        xv_full = self.cache_value[:batch_size, :start_pos+seq_len].detach()
         
         query = xq.transpose(1, 2)         # (batch_size, num_head, seq_len, emb_dim)
         key = xk_full.transpose(1, 2)    # (batch_size, num_head, T_total, emb_dim)
@@ -453,28 +499,28 @@ class kv_cache_group_query(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
         # KV caches
-        self.register_buffer("cache_keys", torch.zeros(batch_size, kv_seq_len*2, kv_num_heads, self.head_dim,device=device,dtype=dtype))
-        self.register_buffer("cache_value", torch.zeros(batch_size, kv_seq_len*2, kv_num_heads, self.head_dim,device=device,dtype=dtype))
+        self.cache_keys = torch.zeros(batch_size, kv_seq_len*2, kv_num_heads, self.head_dim, device=device, dtype=dtype)
+        self.cache_value = torch.zeros(batch_size, kv_seq_len*2, kv_num_heads, self.head_dim, device=device, dtype=dtype)
         
-    def forward(self, x, start_pos, RoPE=False):
+    def forward(self, x, start_pos, rope=False):
         batch_size, seq_len, _ = x.shape
 
         xq = self.query(x).view(batch_size, seq_len, self.query_num_heads, self.head_dim)
         xk = self.key(x).view(batch_size, seq_len, self.kv_num_heads, self.head_dim)
         xv = self.value(x).view(batch_size, seq_len, self.kv_num_heads, self.head_dim)
 
-        if RoPE:
+        if rope:
             freq_xq = RoPE(head_dim=self.head_dim, seq_len=seq_len, device=self.device, dtype=self.dtype)
             xq = freq_xq(xq)
             freq_xk = RoPE(head_dim=self.head_dim, seq_len=self.kv_seq_len, device=self.device, dtype=self.dtype)
             xk = freq_xk(xk)
-
+            
         # Cache keys and values - only update the batch_size portion we're using
-        self.cache_keys[:batch_size, start_pos:start_pos+seq_len] = xk
-        self.cache_value[:batch_size, start_pos:start_pos+seq_len] = xv
+        self.cache_keys[:batch_size, start_pos:start_pos+seq_len] = xk.detach()
+        self.cache_value[:batch_size, start_pos:start_pos+seq_len] = xv.detach()
         # Only use the relevant batch portion from cache
-        xk_full = self.cache_keys[:batch_size, :start_pos+seq_len]
-        xv_full = self.cache_value[:batch_size, :start_pos+seq_len]
+        xk_full = self.cache_keys[:batch_size, :start_pos+seq_len].detach()
+        xv_full = self.cache_value[:batch_size, :start_pos+seq_len].detach()
         
         # Transpose for attention: [B, H, T, D]
         query = xq.transpose(1, 2)  # [B, q_heads, seq_len, D]
