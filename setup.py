@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="Stackformer",
-    version="0.1.2",
+    version="0.1.3",
     description="Modular transformer blocks built in PyTorch",
     # long_description=open("README.md", "r", encoding="utf-8").read(),
     # long_description_content_type="text/markdown",
@@ -18,8 +18,8 @@ setup(
     python_requires=">=3.9",
     packages=find_packages(exclude=["tests", "examples"]),
     install_requires=[
-        "torch>=2.0,<2.6",
-        "tqdm>=4.67",
+    "torch>=2.0,<2.7",
+    "tqdm>=4.5,<5.0",
     ],
     classifiers=[
         "Programming Language :: Python :: 3",
