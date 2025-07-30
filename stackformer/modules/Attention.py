@@ -54,7 +54,7 @@ class Multi_Head_Attention(nn.Module):
         
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x):
+    def forward(self, x, mask=True):
         Batch_size, Seq_len, _ = x.shape
         
         # Generate Q, K, V and reshape for multi-head attention
@@ -64,10 +64,11 @@ class Multi_Head_Attention(nn.Module):
 
         # Compute attention scores
         scores = (Querys @ Keys.transpose(-2, -1)) / self.scale  # (Batch_size, nh, Seq_len, Seq_len)
-
-        # Apply causal mask if requested
-        causal_mask = torch.triu(torch.ones(Seq_len, Seq_len, dtype=torch.bool, device=self.device), diagonal=1)
-        scores = scores.masked_fill_(causal_mask[None, None, :, :], float('-inf'))
+        
+        if mask:
+            # Apply causal mask if requested
+            causal_mask = torch.triu(torch.ones(Seq_len, Seq_len, dtype=torch.bool, device=self.device), diagonal=1)
+            scores = scores.masked_fill_(causal_mask[None, None, :, :], float('-inf'))
         
         # Apply softmax and dropout
         attn = F.softmax(scores, dim=-1)
@@ -147,14 +148,9 @@ class Cross_MultiHead_Attention(nn.Module):
         self.out_proj = nn.Linear(Emb_dim, Emb_dim,dtype=dtype,device=device)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x, context=None):
-        """
-        x: (Batch_size, query_seq_len, Emb_dim) — query input (e.g., decoder hidden states)
-        context: (Batch_size, KV_seq_len, Emb_dim) — source for keys/values (e.g., encoder output). If None, self-attention.
-        mask: (Batch_size, 1, query_seq_len, KV_seq_len) — optional attention mask
-        """
+    def forward(self, x, context):
         Batch_size, query_seq_len, _ = x.shape
-        context = x if context is None else context  # self-attention fallback
+        context = context  # self-attention fallback
         KV_seq_len = context.shape[1]
 
         # Project Q, K, V

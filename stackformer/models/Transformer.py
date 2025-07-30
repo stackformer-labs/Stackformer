@@ -18,7 +18,7 @@ class Encoder(nn.Module):
         
     def forward(self, x):
         residual = x
-        x = self.attention(x)
+        x = self.attention(x, mask = False)
         x = self.norm1(x)
         x = x + residual 
         
