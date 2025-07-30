@@ -88,3 +88,20 @@ class FF_SwiGLU(nn.Module):
         x = self.linear2(x)                 
         x = self.dropout2(x)
         return x.to(device=x.device,dtype=x.dtype)
+
+class FF_GeGLU(nn.Module):
+    def __init__(self, emb_dim, hidden_dim, dropout=0.0, device='cpu', dtype=torch.float32):
+        super().__init__()
+        self.linear1 = nn.Linear(emb_dim, hidden_dim * 2, device=device, dtype=dtype)
+        self.dropout1 = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(hidden_dim, emb_dim, device=device, dtype=dtype)
+        self.dropout2 = nn.Dropout(dropout)
+    
+    def forward(self, x):
+        x_proj = self.linear1(x)            
+        x1, x2 = x_proj.chunk(2, dim=-1)  
+        x = x2 * F.gelu(x1)                 
+        x = self.dropout1(x)
+        x = self.linear2(x)                 
+        x = self.dropout2(x)
+        return x.to(device=x.device,dtype=x.dtype)
