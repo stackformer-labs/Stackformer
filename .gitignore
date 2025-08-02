@@ -1,3 +1,6 @@
 stackformer/datasets/
 How to update pipy.txt
 stackformer/modules/mask.py
+stackformer/__pycache__/
+stackformer/modules/__pycache__/
+stackformer/models/__pycache__/

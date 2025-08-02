@@ -20,12 +20,13 @@ from .modules.Attention import kv_cache_multihead
 from .modules.Attention import kv_cache_group_query
 
 # --- Normalization layers ---
-from .modules.Normalization import LayerNorm
+from .modules.Normalization import LayerNormalization
 from .modules.Normalization import RMSNormilization
 
 # --- Feed Forward layers ---
 from .modules.Feed_forward import FF_ReLU
 from .modules.Feed_forward import FF_GELU
+from .modules.Feed_forward import FF_GeGLU
 from .modules.Feed_forward import FF_LeakyReLU
 from .modules.Feed_forward import FF_Sigmoid
 from .modules.Feed_forward import FF_SiLU

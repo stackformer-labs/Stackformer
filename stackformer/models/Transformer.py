@@ -6,15 +6,15 @@ import torch.nn.functional as F
 from stackformer.modules.Attention import Multi_Head_Attention, Cross_MultiHead_Attention
 from stackformer.modules.position_embedding import SinusoidalPositionalEmbedding
 from stackformer.modules.Feed_forward import FF_ReLU
-from stackformer.modules.Normalization import LayerNorm
+from stackformer.modules.Normalization import LayerNormalization
 
 class Encoder(nn.Module):
     def __init__(self, emb_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
         self.attention = Multi_Head_Attention(emb_dim, num_heads, dropout, device=device, dtype=dtype)
-        self.norm1 = LayerNorm(emb_dim, eps=eps, device=device, dtype=dtype)
+        self.norm1 = LayerNormalization(emb_dim, eps=eps, device=device, dtype=dtype)
         self.ff_relu = FF_ReLU(emb_dim, hidden_dim, dropout, device=device, dtype=dtype)
-        self.norm2 = LayerNorm(emb_dim, eps=eps, device=device, dtype=dtype)
+        self.norm2 = LayerNormalization(emb_dim, eps=eps, device=device, dtype=dtype)
         
     def forward(self, x):
         residual = x
@@ -33,11 +33,11 @@ class Decoder(nn.Module):
     def __init__(self, emb_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
         self.attention = Multi_Head_Attention(emb_dim, num_heads, dropout, device=device, dtype=dtype)
-        self.norm1 = LayerNorm(emb_dim, eps=eps, device=device, dtype=dtype)
+        self.norm1 = LayerNormalization(emb_dim, eps=eps, device=device, dtype=dtype)
         self.cross_attention = Cross_MultiHead_Attention(emb_dim, num_heads, dropout, device=device, dtype=dtype)
-        self.norm2 = LayerNorm(emb_dim, eps=eps, device=device, dtype=dtype)
+        self.norm2 = LayerNormalization(emb_dim, eps=eps, device=device, dtype=dtype)
         self.ff_relu = FF_ReLU(emb_dim, hidden_dim, dropout, device=device, dtype=dtype)
-        self.norm3 = LayerNorm(emb_dim, eps=eps, device=device, dtype=dtype)
+        self.norm3 = LayerNormalization(emb_dim, eps=eps, device=device, dtype=dtype)
         
     def forward(self, x, enc_output):
         residual = x
@@ -79,7 +79,7 @@ class transformer(nn.Module):
         ])
         
         # --- final norm ---
-        self.final_norm = LayerNorm(emb_dim, eps=eps, device=device, dtype=dtype)
+        self.final_norm = LayerNormalization(emb_dim, eps=eps, device=device, dtype=dtype)
         
         # --- output projection ---
         self.out_proj = nn.Linear(emb_dim, vocab_size, device=device, dtype=dtype)

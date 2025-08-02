@@ -70,6 +70,7 @@ class Self_Attention(nn.Module):
         """
         B, T, C = x.shape
 
+        x = x.to(device=self.device, dtype=self.qkv_proj.weight.dtype)
         # Compute queries, keys, and values
         qkv = self.qkv_proj(x)  # Shape: (B, T, 3*C)
         q, k, v = qkv.chunk(3, dim=-1)  # Each of shape: (B, T, C)
