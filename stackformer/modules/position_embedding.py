@@ -14,7 +14,7 @@ class AbsolutePositionEmbedding(nn.Module):
 
     Args:
         seq_len (int): Maximum sequence length
-        emb_dim (int): Embedding dimension (D)
+        embed_dim (int): Embedding dimension (D)
 
     Forward Args:
         x (Tensor): Shape (B, T, ...). Only x.shape[0] and x.shape[1] are used.
@@ -23,15 +23,15 @@ class AbsolutePositionEmbedding(nn.Module):
         Tensor: Positional embeddings of shape (B, T, D)
 
     Example:
-        >>> pos_emb = AbsolutePositionEmbedding(seq_len=512, emb_dim=128)
+        >>> pos_emb = AbsolutePositionEmbedding(seq_len=512, embed_dim=128)
         >>> x = torch.randn(4, 32, 128)  # (B=4, T=32, D=128)
         >>> pos = pos_emb(x)  # (4, 32, 128)
     """
-    def __init__(self, seq_len, emb_dim):
+    def __init__(self, seq_len, embed_dim):
         super().__init__()
         self.seq_len = seq_len
-        self.emb_dim = emb_dim
-        self.embedding = nn.Embedding(seq_len, emb_dim)
+        self.embed_dim = embed_dim
+        self.embedding = nn.Embedding(seq_len, embed_dim)
 
     def forward(self, x):
         batch_size, seq_len = x.shape[0], x.shape[1]
@@ -57,25 +57,25 @@ class SinusoidalPositionalEmbedding(nn.Module):
 
     Args:
         seq_len (int): Maximum sequence length
-        emb_dim (int): Embedding dimension (must be even)
+        embed_dim (int): Embedding dimension (must be even)
 
     Returns:
         Tensor: Sinusoidal encoding (B, T, D)
 
     Example:
-        >>> pe = SinusoidalPositionalEmbedding(seq_len=512, emb_dim=128)
+        >>> pe = SinusoidalPositionalEmbedding(seq_len=512, embed_dim=128)
         >>> x = torch.randn(4, 32, 128)
         >>> pos = pe(x)  # (4, 32, 128)
     """
-    def __init__(self, seq_len, emb_dim):
+    def __init__(self, seq_len, embed_dim):
         super().__init__()
         self.seq_len = seq_len
-        self.emb_dim = emb_dim
+        self.embed_dim = embed_dim
 
         position = torch.arange(0, seq_len).unsqueeze(1)  # (T, 1)
-        div_term = torch.exp(torch.arange(0, emb_dim, 2) * -(math.log(10000.0) / emb_dim))  # (D/2)
+        div_term = torch.exp(torch.arange(0, embed_dim, 2) * -(math.log(10000.0) / embed_dim))  # (D/2)
 
-        pe = torch.zeros(seq_len, emb_dim)
+        pe = torch.zeros(seq_len, embed_dim)
         pe[:, 0::2] = torch.sin(position * div_term)  # even dims
         pe[:, 1::2] = torch.cos(position * div_term)  # odd dims
 
@@ -136,14 +136,14 @@ class RoPE(nn.Module):
         self.register_buffer("freq_complex", torch.polar(torch.ones_like(freqs), freqs))  # (T, D/2)
 
     def forward(self, x):
-        batch_size, seq_len, num_head, emb_dim = x.shape
-        assert emb_dim % 2 == 0, "emb_dim must be even"
+        batch_size, seq_len, num_head, embed_dim = x.shape
+        assert embed_dim % 2 == 0, "embed_dim must be even"
 
-        x_reshaped = x.view(batch_size, seq_len, num_head, emb_dim // 2, 2)
+        x_reshaped = x.view(batch_size, seq_len, num_head, embed_dim // 2, 2)
         x_complex = torch.view_as_complex(x_reshaped)  # (B, T, H, D/2)
 
         freqs = self.freq_complex[:seq_len].unsqueeze(0).unsqueeze(2)  # (1, T, 1, D/2)
         x_rotated = x_complex * freqs  # Element-wise complex multiplication
 
-        x_out = torch.view_as_real(x_rotated).contiguous().view(batch_size, seq_len, num_head, emb_dim)
+        x_out = torch.view_as_real(x_rotated).contiguous().view(batch_size, seq_len, num_head, embed_dim)
         return x_out.to(device=x.device, dtype=x.dtype)

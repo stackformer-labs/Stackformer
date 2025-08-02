@@ -89,107 +89,77 @@ pip install -e .
 
 ```python
 import torch
-from stackformer import (
-    llama_2, 
-    Group_query_Attention, 
-    RMSNormilization, 
-    FF_SwiGLU,
-    RoPE
-)
+from stackformer.models.Meta import llama_1
 
-# Create LLaMA-2 7B style model
-model = llama_2(
-    vocab_size=32000,      # LLaMA tokenizer size
-    d_model=4096,          # Hidden dimension
-    n_heads=32,            # Attention heads
-    n_kv_heads=8,          # Key-value heads (4x compression)
-    n_layers=32,           # Transformer layers
-    max_seq_len=4096,      # Context length
-    multiple_of=256,       # SwiGLU dimension multiple
-    dropout=0.0            # No dropout in LLaMA
+# LLaMA-1 7B configuration
+model = llama_1(
+    vocab_size=32_000,      # LLaMA tokenizer vocab size
+    num_layers=32,          # Number of transformer layers
+    embed_dim=4096,         # Embedding dimension
+    num_heads=32,           # Number of attention heads
+    seq_len=2048,           # Max sequence length for LLaMA-1
+    dropout=0.0,            # No dropout in original LLaMA
+    hidden_dim=4096        # FFN hidden dimension for 7B
 )
 
 # Generate text
-input_ids = torch.randint(0, 32000, (1, 100))
+input_ids = torch.randint(0, 32_000, (1, 100))  # dummy input
 output = model(input_ids)
-print(f"LLaMA-2 output shape: {output.shape}")  # [1, 100, 32000]
+print(f"LLaMA-1 7B output shape: {output.shape}")  # Expected: [1, 100, 32000]
 ```
 
 ### Mix & Match Components
 
 ```python
-from stackformer import (
-    Multi_Head_Attention_with_RoPE,
-    Group_query_Attention, 
-    RMSNormilization,
-    FF_SwiGLU,
-    kv_cache_group_query
-)
+import torch
+import torch.nn as nn
+from stackformer.modules.Attention import Multi_latent_Attention
+from stackformer.modules.Feed_forward import FF_SwiGLU
+from stackformer.modules.Normalization import RMSNormilization
 
-# Create a custom hybrid architecture
 class CustomTransformerBlock(nn.Module):
-    def __init__(self, d_model=2048, n_heads=16, n_kv_heads=4):
+    def __init__(self, embed_dim=512, q_compressed_dim=256, kv_compressed_dim=256,
+                 num_heads=8, hidden_dim=None, dropout=0.0, eps=1e-5,
+                 device=None, dtype=None):
         super().__init__()
-        
-        # Use RMSNorm like LLaMA for efficiency
-        self.attention_norm = RMSNormilization(d_model)
-        self.ffn_norm = RMSNormilization(d_model)
-        
-        # Group Query Attention with RoPE
-        self.attention = Group_query_Attention(
-            d_model=d_model,
-            n_heads=n_heads,
-            n_kv_heads=n_kv_heads,  # 4x memory reduction
-            dropout=0.0
+
+        self.embed_dim = embed_dim
+        self.hidden_dim = hidden_dim or 4 * embed_dim  # default to 4x if not given
+
+        self.attention_norm = RMSNormilization(embed_dim, eps=eps)
+        self.ffn_norm = RMSNormilization(embed_dim, eps=eps)
+
+        self.attention = Multi_latent_Attention(
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            q_compressed_dim=q_compressed_dim,
+            kv_compressed_dim=kv_compressed_dim,
+            dropout=dropout
         )
-        
-        # SwiGLU feed-forward (LLaMA-style)
+
         self.feed_forward = FF_SwiGLU(
-            d_model=d_model,
-            d_ff=int(2.67 * d_model),  # LLaMA ratio
-            dropout=0.0
+            embed_dim=embed_dim,
+            hidden_dim=self.hidden_dim,
+            device=device,
+            dtype=dtype
         )
-    
+
     def forward(self, x):
         # Pre-norm architecture
         attn_out = self.attention(self.attention_norm(x))
         x = x + attn_out
-        
+
         ffn_out = self.feed_forward(self.ffn_norm(x))
         x = x + ffn_out
+
         return x
 
-# Use your custom block
-block = CustomTransformerBlock()
-x = torch.randn(4, 1024, 2048)  # [batch, seq_len, d_model]
+# --- Usage example with matching dimensions ---
+embed_dim = 512
+block = CustomTransformerBlock(embed_dim=embed_dim)
+x = torch.randn(4, 1024, embed_dim)  # [batch, seq_len, embed_dim]
 output = block(x)
-```
-
-### Efficient Inference with KV-Caching
-
-```python
-from stackformer import kv_cache_group_query, text_generate
-
-# Create KV-cached attention for fast inference
-cached_attention = kv_cache_group_query(
-    d_model=4096,
-    n_heads=32,
-    n_kv_heads=8,
-    max_seq_len=4096
-)
-
-# Generate text efficiently
-from stackformer import text_generate
-
-generated_text = text_generate(
-    model=model,
-    prompt="The future of AI is",
-    max_length=100,
-    temperature=0.8,
-    top_k=50,
-    top_p=0.9
-)
-print(generated_text)
+print(f"Output shape: {output.shape}") # Output shape: torch.Size([4, 1024, 512])
 ```
 
 ---
@@ -201,30 +171,16 @@ stackformer/
 ├── modules/
 │   ├── tokenizer.py           # tiktoken integration
 │   ├── position_embedding.py  # Absolute, Sinusoidal, RoPE
-│   ├── Attention.py           # 12+ attention mechanisms
+│   ├── Attention.py           # 11 attention mechanisms
 │   ├── Normalization.py       # LayerNorm, RMSNorm
 │   └── Feed_forward.py        # 7+ activation functions
 ├── models/
 │   ├── OpenAI.py             # GPT-1, GPT-2 implementations
 │   ├── Meta.py               # LLaMA-1, LLaMA-2 implementations
-│   └── Transformer.py        # Custom transformer builder
+│   └── Transformer.py        # orginal transformer model
 ├── trainer.py                # Training utilities and loops
 └── generate.py               # Text generation utilities
 ```
-
----
-
-## 📊 Performance Benchmarks
-
-| Model | Parameters | Memory (GB) | Speed (tokens/sec) | Stackformer vs HuggingFace |
-|-------|------------|-------------|-------------------|---------------------------|
-| GPT-2 Small | 124M | 0.5 | 2,400 | 🟢 5% faster |
-| GPT-2 Medium | 355M | 1.4 | 1,800 | 🔵 Similar |
-| LLaMA-7B | 7B | 13.5 | 45 | 🟢 10% less memory |
-| LLaMA-13B | 13B | 26.0 | 23 | 🟢 15% less memory |
-| Custom-3B | 3B | 6.2 | 85 | 🟢 Native implementation |
-
-*Benchmarked on A100 40GB, batch_size=1, fp16. Group Query Attention provides significant memory savings.*
 
 ---
 
@@ -233,7 +189,7 @@ stackformer/
 ### 1. Reproduce LLaMA-2 Architecture
 
 ```python
-from stackformer import llama_2, RoPE, Group_query_Attention, FF_SwiGLU
+from stackformer import llama_2
 
 # Exact LLaMA-2 7B configuration
 model = llama_2(
@@ -291,8 +247,8 @@ output = latent_attn(x)  # Compressed attention through latent space
 ### 4. Complete Training Example
 
 ```python
-from stackformer import Trainer, GPT_2, text_generate
-import torch.optim as optim
+from stackformer.models.OpenAI import GPT_2
+from stackformer.trainer import Trainer
 
 # Create GPT-2 model
 model = GPT_2(
@@ -305,130 +261,25 @@ model = GPT_2(
 )
 
 # Setup training
-optimizer = optim.AdamW(
-    model.parameters(), 
-    lr=1e-4, 
-    weight_decay=0.01,
-    betas=(0.9, 0.95)
-)
-
 trainer = Trainer(
     model=model,
-    optimizer=optimizer,
-    device='cuda',
-    gradient_clip=1.0,
-    log_interval=100
+    train_dataset=train_dataset,
+    eval_dataset=val_dataset,
+    vocab_size=vocab_size,
+    train_batch_size=64,
+    eval_batch_size=64,
+    output_dir='./checkpoint',
+    num_epoch=4,
+    lr=5e-5,
+    scheduler_type="cosine",
+    Save_epoch=1,
+    optimizer_type="adamw",
+    device='cuda' if torch.cuda.is_available() else 'cpu'
 )
 
-# Training loop (replace with your dataset)
-for epoch in range(10):
-    # Your training data loading here
-    train_loader = get_your_dataloader()  # Implement this
-    
-    epoch_loss = trainer.train_epoch(train_loader)
-    print(f"Epoch {epoch}, Loss: {epoch_loss:.4f}")
-    
-    # Generate sample text
-    sample_text = text_generate(
-        model=model,
-        prompt="The transformer architecture",
-        max_length=50,
-        temperature=0.8
-    )
-    print(f"Generated: {sample_text}")
+trainer.train()
 ```
-
 ---
-
-## 🔮 Upcoming Features (MoE Coming Tomorrow!)
-
-### **🚀 Next Release (v0.3.0)**
-- ✅ **Mixture of Experts (MoE)** - Sparse expert routing (in development)
-- ⏳ **Flash Attention** - Memory-efficient attention computation
-- ⏳ **Model Parallelism** - Distribute large models across GPUs
-- ⏳ **Quantization Utils** - INT8/FP16 optimization tools
-
-### **🌟 Research Integration**
-- **Mamba/State Space Models** - Linear complexity sequence modeling
-- **RetNet** - Alternative to transformer architecture
-- **PaLM-style** - Parallel attention and MLP
-- **Mixture of Depths** - Adaptive computation depth
-
----
-
-## 📚 Learning Resources & Examples
-
-### **📖 Documentation**
-- **[Quick Start Guide](docs/quickstart.md)** - Get running in 5 minutes
-- **[Architecture Deep Dive](docs/architectures.md)** - Understanding GPT vs LLaMA
-- **[Attention Mechanisms](docs/attention.md)** - Complete attention guide
-- **[API Reference](docs/api/)** - Detailed component documentation
-
-### **🛠️ Examples & Tutorials**
-- **[GPT-2 from Scratch](examples/gpt2_tutorial.py)** - Build GPT-2 step by step
-- **[LLaMA Fine-tuning](examples/llama_finetune.py)** - Fine-tune LLaMA on custom data
-- **[Custom Architecture](examples/custom_transformer.py)** - Mix and match components
-- **[Efficient Inference](examples/kv_cache_demo.py)** - Fast generation with caching
-
-### **📊 Benchmarks & Analysis**
-- **[Performance Comparison](benchmarks/model_comparison.py)** - Stackformer vs others
-- **[Memory Analysis](benchmarks/memory_profiling.py)** - Memory usage breakdown
-- **[Attention Patterns](benchmarks/attention_visualization.py)** - Visualize attention
-
----
-
-## 🛠️ Development & Contributing
-
-### **Development Setup**
-
-```bash
-# Clone and setup development environment
-git clone https://github.com/Gurumurthy30/Stackformer.git
-cd Stackformer
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# Install development dependencies
-pip install -e ".[dev]"
-
-# Run tests
-pytest tests/ -v
-
-# Run benchmarks
-python benchmarks/run_all_benchmarks.py
-
-# Format code
-black stackformer/
-isort stackformer/
-```
-
-### **Project Roadmap**
-
-**✅ Completed:**
-- Complete GPT-1/2 implementations
-- Full LLaMA-1/2 support with Group Query Attention
-- 12+ attention mechanisms including advanced variants
-- RoPE, RMSNorm, SwiGLU implementations
-- KV-caching for efficient inference
-- Comprehensive tokenization support
-
-**🔄 In Progress:**
-- Mixture of Experts (MoE) feed-forward layers
-- Flash Attention integration
-- Comprehensive test coverage
-- Performance optimizations
-
-**📋 Planned:**
-- Model parallelism and distributed training
-- Quantization utilities (INT8, FP16)
-- Pre-trained model zoo
-- Advanced generation algorithms
-- Integration with popular training frameworks
-
----
-
 ## 🌟 Why Stackformer Stands Out
 
 ### **🔬 Research-Grade Quality**
@@ -436,12 +287,6 @@ isort stackformer/
 - **Latest Innovations** - RoPE, Group Query, SwiGLU, and more
 - **Flexible Experimentation** - Mix any attention with any normalization
 - **Educational Value** - Clear, readable code for learning
-
-### **🚀 Production Ready**
-- **Optimized Performance** - Competitive with industry libraries
-- **Memory Efficient** - Group Query Attention reduces memory by 4x
-- **Proper Error Handling** - Robust input validation and error messages
-- **Comprehensive Testing** - Ensures reliability in production
 
 ### **👥 Community Focused**
 - **Open Source** - MIT license for commercial and research use
@@ -469,8 +314,8 @@ isort stackformer/
 
 - **🐛 Bug Reports:** [GitHub Issues](https://github.com/Gurumurthy30/Stackformer/issues)
 - **💡 Feature Requests:** [GitHub Discussions](https://github.com/Gurumurthy30/Stackformer/discussions)
-- **📧 Direct Contact:** [gurumurthy.contact@email.com](mailto:your-email@example.com)
-- **💼 LinkedIn:** [Connect with Gurumurthy](https://linkedin.com/in/your-profile)
+- **📧 Direct Contact:** [gurumurthy.00300@gmail.com](mailto:gurumurthy.00300@gmail.com)
+- **💼 LinkedIn:** [Connect with Gurumurthy](https://www.linkedin.com/in/gurumurthy-r-27b416337/)
 - **🐦 Updates:** Follow development progress and announcements
 
 ---
@@ -501,19 +346,6 @@ If you use Stackformer in your research, please cite:
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-## 🙏 Acknowledgments
-
-- **Vaswani et al.** - "Attention Is All You Need" (Original Transformer)
-- **Radford et al.** - GPT-1 and GPT-2 architectures
-- **Touvron et al.** - LLaMA and LLaMA-2 innovations
-- **Su et al.** - RoPE (Rotary Position Embeddings)
-- **Zhang & Sennrich** - Root Mean Square Layer Normalization
-- **Shazeer** - SwiGLU activation function
-- **PyTorch Team** - Excellent deep learning framework
-- **tiktoken** - Efficient tokenization library
 
 ---
 

@@ -13,25 +13,25 @@ class LayerNormalization(nn.Module):
         - Scale and shift: output = gamma * normalized_x + beta
 
     Args:
-        emb_dim (int): Size of the last dimension (embedding dimension)
+        embed_dim (int): Size of the last dimension (embedding dimension)
         eps (float): Small constant added to avoid division by zero
 
     Forward Args:
-        x (Tensor): Input tensor of shape (batch_size, seq_length, emb_dim)
+        x (Tensor): Input tensor of shape (batch_size, seq_length, embed_dim)
 
     Returns:
         Tensor: Output tensor of the same shape as input
 
     Example:
-        >>> layer_norm = LayerNormalization(emb_dim=64)
+        >>> layer_norm = LayerNormalization(embed_dim=64)
         >>> x = torch.randn(4, 10, 64)
         >>> output = layer_norm(x)
     """
-    def __init__(self, emb_dim, eps=1e-5):
+    def __init__(self, embed_dim, eps=1e-5):
         super().__init__()
         self.eps = eps
-        self.weight = nn.Parameter(torch.ones(emb_dim))  # gamma
-        self.bias = nn.Parameter(torch.zeros(emb_dim))   # beta
+        self.weight = nn.Parameter(torch.ones(embed_dim))  # gamma
+        self.bias = nn.Parameter(torch.zeros(embed_dim))   # beta
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         mean = x.mean(dim=-1, keepdim=True)
@@ -51,24 +51,24 @@ class RMSNormilization(nn.Module):
         - Scale: output = gamma * normalized_x
 
     Args:
-        emb_dim (int): Size of the last dimension (embedding dimension)
+        embed_dim (int): Size of the last dimension (embedding dimension)
         eps (float): Small constant added to avoid division by zero
 
     Forward Args:
-        x (Tensor): Input tensor of shape (batch_size, seq_length, emb_dim)
+        x (Tensor): Input tensor of shape (batch_size, seq_length, embed_dim)
 
     Returns:
         Tensor: Output tensor of the same shape as input
 
     Example:
-        >>> rms_norm = RMSNormilization(emb_dim=64)
+        >>> rms_norm = RMSNormilization(embed_dim=64)
         >>> x = torch.randn(4, 10, 64)
         >>> output = rms_norm(x)
     """
-    def __init__(self, emb_dim, eps=1e-5):
+    def __init__(self, embed_dim, eps=1e-5):
         super().__init__()
         self.eps = eps
-        self.weight = nn.Parameter(torch.ones(emb_dim))  # gamma
+        self.weight = nn.Parameter(torch.ones(embed_dim))  # gamma
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         rms = x.pow(2).mean(-1, keepdim=True).sqrt()
