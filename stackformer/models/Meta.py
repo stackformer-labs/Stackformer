@@ -16,12 +16,12 @@ FF: SwiGLU
 Norm: pre norm (RMS norm)
 '''
 class llama_1_Block(nn.Module):
-    def __init__(self, emb_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
+    def __init__(self, embed_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
-        self.attention = Multi_Head_Attention_with_RoPE(emb_dim, num_heads, dropout, device=device, dtype=dtype)
-        self.norm1 = RMSNormilization(emb_dim, eps=eps)
-        self.FF_SwiGLU = FF_SwiGLU(emb_dim, hidden_dim, dropout, device=device, dtype=dtype)
-        self.norm2 = RMSNormilization(emb_dim, eps=eps)
+        self.attention = Multi_Head_Attention_with_RoPE(embed_dim, num_heads, dropout, device=device, dtype=dtype)
+        self.norm1 = RMSNormilization(embed_dim, eps=eps)
+        self.FF_SwiGLU = FF_SwiGLU(embed_dim, hidden_dim, dropout, device=device, dtype=dtype)
+        self.norm2 = RMSNormilization(embed_dim, eps=eps)
         
     def forward(self, x):
         residual = x
@@ -38,10 +38,10 @@ class llama_1_Block(nn.Module):
 
 # --- Encoder ---
 class llama_1_Encoder(nn.Module):
-    def __init__(self, num_layers, emb_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
+    def __init__(self, num_layers, embed_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
         self.layers = nn.ModuleList([
-            llama_1_Block(emb_dim, num_heads, dropout, hidden_dim, eps, device=device, dtype=dtype)
+            llama_1_Block(embed_dim, num_heads, dropout, hidden_dim, eps, device=device, dtype=dtype)
             for _ in range(num_layers)
         ])
         
@@ -51,7 +51,7 @@ class llama_1_Encoder(nn.Module):
         return x
 
 class llama_1(nn.Module):
-    def __init__(self, vocab_size, num_layers, emb_dim, num_heads, seq_len,
+    def __init__(self, vocab_size, num_layers, embed_dim, num_heads, seq_len,
             dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
         self.device = device
@@ -59,21 +59,21 @@ class llama_1(nn.Module):
         self.seq_len = seq_len
         
         # --- Token embedding ---
-        self.embedding = nn.Embedding(vocab_size, emb_dim, dtype=self.dtype, device=self.device)
+        self.embedding = nn.Embedding(vocab_size, embed_dim, dtype=self.dtype, device=self.device)
         
         # --- Encoder ---
-        self.encoder = llama_1_Encoder(num_layers=num_layers,emb_dim=emb_dim,num_heads=num_heads,dropout=dropout,
+        self.encoder = llama_1_Encoder(num_layers=num_layers,embed_dim=embed_dim,num_heads=num_heads,dropout=dropout,
                                     hidden_dim=hidden_dim,eps=eps,device=self.device,dtype=self.dtype)
         
         # --- Final norm        
-        self.final_norm = RMSNormilization(emb_dim, eps=eps)
+        self.final_norm = RMSNormilization(embed_dim, eps=eps)
         
         # --- Output Projection ---
-        self.lm_head = nn.Linear(emb_dim, vocab_size, bias=False, dtype=self.dtype, device=self.device)
+        self.lm_head = nn.Linear(embed_dim, vocab_size, bias=False, dtype=self.dtype, device=self.device)
     
     def forward(self, x):
         # x shape: (batch_size, seq_len)
-        emb = self.embedding(x)  # (batch_size, seq_len, emb_dim)
+        emb = self.embedding(x)  # (batch_size, seq_len, embed_dim)
         x = self.encoder(emb)
         x = self.final_norm(x)
         x = self.lm_head(x)
@@ -92,14 +92,14 @@ FF: SwiGLU
 Norm: pre norm (RMS norm)
 '''
 class llama_2_Block(nn.Module):
-    def __init__(self, emb_dim, query_num_heads, kv_num_heads, batch_size, kv_seq_len, hidden_dim,
+    def __init__(self, embed_dim, num_query_heads, num_kv_heads, batch_size, kv_seq_len, hidden_dim,
                 eps=1e-5, dropout=0.1, dtype=torch.float32, device='cpu'):
         super().__init__()
-        self.attn_norm = RMSNormilization(emb_dim, eps=eps)
-        self.ff_norm = RMSNormilization(emb_dim, eps=eps)
-        self.attn = kv_cache_group_query(emb_dim=emb_dim, query_num_heads=query_num_heads, kv_num_heads=kv_num_heads,
-                                        batch_size=batch_size, kv_seq_len=kv_seq_len, dtype=dtype,dropout=dropout, device=device)
-        self.ff = FF_SwiGLU(emb_dim=emb_dim, hidden_dim=hidden_dim, device=device, dtype=dtype)
+        self.attn_norm = RMSNormilization(embed_dim, eps=eps)
+        self.ff_norm = RMSNormilization(embed_dim, eps=eps)
+        self.attn = kv_cache_group_query(embed_dim=embed_dim, num_query_heads=num_query_heads, num_kv_heads=num_kv_heads,
+                                        batch_size=batch_size, kv_seq_len=kv_seq_len, dtype=dtype, dropout=dropout, device=device)
+        self.ff = FF_SwiGLU(embed_dim=embed_dim, hidden_dim=hidden_dim, device=device, dtype=dtype)
 
     def forward(self, x, start_pos):
         residual = x
@@ -114,11 +114,11 @@ class llama_2_Block(nn.Module):
         return x
 
 class llama_2_Encoder(nn.Module):
-    def __init__(self, num_layers, emb_dim, query_num_heads, kv_num_heads, batch_size, kv_seq_len,
+    def __init__(self, num_layers, embed_dim, num_query_heads, num_kv_heads, batch_size, kv_seq_len,
                 hidden_dim, eps=1e-5, dropout=0.1, dtype=torch.float32, device='cpu'):
         super().__init__()
         self.layers = nn.ModuleList([
-            llama_2_Block(emb_dim=emb_dim, query_num_heads=query_num_heads, kv_num_heads=kv_num_heads,
+            llama_2_Block(embed_dim=embed_dim, num_query_heads=num_query_heads, num_kv_heads=num_kv_heads,
                 batch_size=batch_size, kv_seq_len=kv_seq_len, hidden_dim=hidden_dim,
                 eps=eps, dropout=dropout, dtype=dtype, device=device)
             for _ in range(num_layers)
@@ -130,7 +130,7 @@ class llama_2_Encoder(nn.Module):
         return x
 
 class llama_2(nn.Module):
-    def __init__(self, num_layers, emb_dim, query_num_heads, kv_num_heads, batch_size, kv_seq_len, vocab_size,
+    def __init__(self, num_layers, embed_dim, num_query_heads, num_kv_heads, batch_size, kv_seq_len, vocab_size,
                 hidden_dim, eps=1e-5, dropout=0.1, dtype=torch.float32, device='cpu'):
         super().__init__()
         self.device = device
@@ -138,14 +138,14 @@ class llama_2(nn.Module):
         self.dtype = dtype
         self.seq_len = kv_seq_len  # For generation slicing
 
-        self.embedding = nn.Embedding(vocab_size, emb_dim, dtype=dtype, device=device)
+        self.embedding = nn.Embedding(vocab_size, embed_dim, dtype=dtype, device=device)
 
-        self.llama_2_Encoder = llama_2_Encoder(num_layers=num_layers, emb_dim=emb_dim, query_num_heads=query_num_heads,
-                            kv_num_heads=kv_num_heads, batch_size=batch_size, kv_seq_len=kv_seq_len,
+        self.llama_2_Encoder = llama_2_Encoder(num_layers=num_layers, embed_dim=embed_dim, num_query_heads=num_query_heads,
+                            num_kv_heads=num_kv_heads, batch_size=batch_size, kv_seq_len=kv_seq_len,
                             hidden_dim=hidden_dim, eps=eps, dropout=dropout, dtype=dtype, device=device)
 
-        self.final_norm = RMSNormilization(emb_dim, eps=eps)
-        self.lm_head = nn.Linear(emb_dim, vocab_size, bias=False, dtype=dtype, device=device)
+        self.final_norm = RMSNormilization(embed_dim, eps=eps)
+        self.lm_head = nn.Linear(embed_dim, vocab_size, bias=False, dtype=dtype, device=device)
 
     def forward(self, input_ids, start_pos=0):
         x = self.embedding(input_ids)

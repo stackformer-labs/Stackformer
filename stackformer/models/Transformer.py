@@ -9,12 +9,12 @@ from stackformer.modules.Feed_forward import FF_ReLU
 from stackformer.modules.Normalization import LayerNormalization
 
 class Encoder(nn.Module):
-    def __init__(self, emb_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
+    def __init__(self, embed_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
-        self.attention = Multi_Head_Attention(emb_dim, num_heads, dropout, device=device, dtype=dtype)
-        self.norm1 = LayerNormalization(emb_dim, eps=eps, device=device, dtype=dtype)
-        self.ff_relu = FF_ReLU(emb_dim, hidden_dim, dropout, device=device, dtype=dtype)
-        self.norm2 = LayerNormalization(emb_dim, eps=eps, device=device, dtype=dtype)
+        self.attention = Multi_Head_Attention(embed_dim, num_heads, dropout, device=device, dtype=dtype)
+        self.norm1 = LayerNormalization(embed_dim, eps=eps, device=device, dtype=dtype)
+        self.ff_relu = FF_ReLU(embed_dim, hidden_dim, dropout, device=device, dtype=dtype)
+        self.norm2 = LayerNormalization(embed_dim, eps=eps, device=device, dtype=dtype)
         
     def forward(self, x):
         residual = x
@@ -30,14 +30,14 @@ class Encoder(nn.Module):
         return x
     
 class Decoder(nn.Module):
-    def __init__(self, emb_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
+    def __init__(self, embed_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
-        self.attention = Multi_Head_Attention(emb_dim, num_heads, dropout, device=device, dtype=dtype)
-        self.norm1 = LayerNormalization(emb_dim, eps=eps, device=device, dtype=dtype)
-        self.cross_attention = Cross_MultiHead_Attention(emb_dim, num_heads, dropout, device=device, dtype=dtype)
-        self.norm2 = LayerNormalization(emb_dim, eps=eps, device=device, dtype=dtype)
-        self.ff_relu = FF_ReLU(emb_dim, hidden_dim, dropout, device=device, dtype=dtype)
-        self.norm3 = LayerNormalization(emb_dim, eps=eps, device=device, dtype=dtype)
+        self.attention = Multi_Head_Attention(embed_dim, num_heads, dropout, device=device, dtype=dtype)
+        self.norm1 = LayerNormalization(embed_dim, eps=eps, device=device, dtype=dtype)
+        self.cross_attention = Cross_MultiHead_Attention(embed_dim, num_heads, dropout, device=device, dtype=dtype)
+        self.norm2 = LayerNormalization(embed_dim, eps=eps, device=device, dtype=dtype)
+        self.ff_relu = FF_ReLU(embed_dim, hidden_dim, dropout, device=device, dtype=dtype)
+        self.norm3 = LayerNormalization(embed_dim, eps=eps, device=device, dtype=dtype)
         
     def forward(self, x, enc_output):
         residual = x
@@ -58,31 +58,31 @@ class Decoder(nn.Module):
         return x
         
 class transformer(nn.Module):
-    def __init__(self, vocab_size, emb_dim, num_heads, dropout, hidden_dim, 
+    def __init__(self, vocab_size, embed_dim, num_heads, dropout, hidden_dim, 
                 encoder_layers, decoder_layers, seq_len, eps=1e-5, device='cpu', dtype=torch.float32,
                 ):
         super().__init__()
         self.encoder_layers = encoder_layers
         self.decoder_layers = decoder_layers
         
-        self.token_emb = nn.Embedding(vocab_size, emb_dim, device=device, dtype=dtype)
-        self.pos = SinusoidalPositionalEmbedding(seq_len=seq_len, emb_dim=emb_dim)
+        self.token_emb = nn.Embedding(vocab_size, embed_dim, device=device, dtype=dtype)
+        self.pos = SinusoidalPositionalEmbedding(seq_len=seq_len, embed_dim=embed_dim)
         
         self.encoder_stack = nn.ModuleList([
-            Encoder(emb_dim, num_heads, dropout, hidden_dim, eps=eps, device=device, dtype=dtype)
+            Encoder(embed_dim, num_heads, dropout, hidden_dim, eps=eps, device=device, dtype=dtype)
             for _ in range(encoder_layers)
         ])
         
         self.decoder_stack = nn.ModuleList([
-            Decoder(emb_dim, num_heads, dropout, hidden_dim, eps=eps, device=device, dtype=dtype)
+            Decoder(embed_dim, num_heads, dropout, hidden_dim, eps=eps, device=device, dtype=dtype)
             for _ in range(decoder_layers)
         ])
         
         # --- final norm ---
-        self.final_norm = LayerNormalization(emb_dim, eps=eps, device=device, dtype=dtype)
+        self.final_norm = LayerNormalization(embed_dim, eps=eps, device=device, dtype=dtype)
         
         # --- output projection ---
-        self.out_proj = nn.Linear(emb_dim, vocab_size, device=device, dtype=dtype)
+        self.out_proj = nn.Linear(embed_dim, vocab_size, device=device, dtype=dtype)
         
     def encoder(self, x):
         x = self.token_emb(x) + self.pos(x)
