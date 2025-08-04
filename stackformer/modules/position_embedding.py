@@ -32,15 +32,22 @@ class AbsolutePositionEmbedding(nn.Module):
         self.seq_len = seq_len
         self.embed_dim = embed_dim
         self.device = device
-        self.dtype = dtype
         self.embedding = nn.Embedding(seq_len, embed_dim, device=device, dtype=dtype)
 
     def forward(self, x):
+        # x: either (batch, seq_len) tokens or (batch, seq_len, embed_dim) embeddings
         batch_size, seq_len = x.shape[0], x.shape[1]
-        positions = torch.arange(seq_len, device=self.device, dtype=self.dtype)
-        abs_pos = self.embedding(positions)  # (T, D)
+
+        # Generate positions as LongTensor
+        positions = torch.arange(seq_len, device=self.device, dtype=torch.long)
+
+        # Get positional embeddings
+        abs_pos = self.embedding(positions)  # (seq_len, embed_dim)
+
+        # Expand to (batch, seq_len, embed_dim)
         out = abs_pos.unsqueeze(0).expand(batch_size, seq_len, -1)
-        return out.to(device=x.device, dtype=x.dtype)
+
+        return out
     
 class SinusoidalPositionalEmbedding(nn.Module):
     """
