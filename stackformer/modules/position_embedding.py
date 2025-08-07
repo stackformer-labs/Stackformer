@@ -1,3 +1,25 @@
+"""
+Positional Embeddings for StackFormer Library
+
+This module implements various positional encoding techniques that inject positional 
+information into input embeddings for transformer architectures. Included are:
+
+1. AbsolutePositionalEmbedding
+    - Learns a unique embedding vector for each position up to a fixed maximum.
+    - Simple and effective for fixed-length input sequences.
+
+2. SinusoidalPositionalEmbedding
+    - Uses deterministic sine and cosine functions of different frequencies.
+    - Generalizes to longer sequences without additional parameters.
+
+3. RotaryPositionalEmbedding (RoPE)
+    - Encodes relative positional information by rotating query/key vectors in complex space.
+    - Supports extrapolation and improves attention patterns in autoregressive models.
+
+Each method is implemented in PyTorch and designed to be easily pluggable into 
+transformer-based models.
+"""
+
 import math
 import torch
 import torch.nn as nn

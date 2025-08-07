@@ -3,7 +3,14 @@ Feed Forward Neural Network Modules for StackFormer Library
 
 This module contains various feed-forward network implementations with different 
 activation functions commonly used in transformer architectures and deep learning models.
-
+modules such as:
+    - FF with ReLU
+    - FF with Leaky ReLU
+    - FF with SiLU
+    - FF with GELU
+    - FF with Sigmoid
+    - FF with SwiGLU
+    - FF with GeGLU
 """
 
 import torch

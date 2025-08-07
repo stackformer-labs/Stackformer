@@ -1,3 +1,21 @@
+"""
+Normalization Layers for StackFormer Library
+
+This module provides essential normalization techniques commonly used in transformer 
+and deep learning architectures to stabilize and accelerate training. It includes:
+
+1. Layer Normalization (LayerNorm)
+    - Normalizes across the feature dimension for each token independently.
+    - Helps reduce internal covariate shift in deep networks.
+
+2. Root Mean Square Layer Normalization (RMSNorm)
+    - Scales inputs based on their root mean square value without subtracting the mean.
+    - Offers a computationally efficient and often more stable alternative to LayerNorm.
+
+Both implementations are written in PyTorch and are designed for modular integration 
+into custom transformer-based models.
+"""
+
 import torch
 import torch.nn as nn
 

@@ -1,3 +1,18 @@
+"""
+Attention Mechanisms for StackFormer Library
+
+This module provides a comprehensive suite of attention mechanisms used in modern 
+transformer architectures. It includes various self-attention and cross-attention 
+modules such as:
+
+- Single-head and Multi-head Self-Attention
+- Multi-head Attention with Rotary Positional Embeddings (RoPE)
+- Multi-Query and Grouped Query Attention (MQA, GQA)
+- Linear and Local Attention for efficient long-sequence modeling
+- Cross-Attention for encoder-decoder architectures
+- Attention with Key/Value (KV) caching for autoregressive decoding
+"""
+
 import math
 import torch
 import torch.nn as nn
