@@ -1,10 +1,15 @@
-# 🚀 Stackformer
+<p align="center">
+  <img src="assets/logo_2.png" width="478" height="170">
+  <br>
+</p>
 
-[![PyPI version](https://badge.fury.io/py/Stackformer.svg)](https://badge.fury.io/py/Stackformer)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Downloads](https://pepy.tech/badge/stackformer)](https://pepy.tech/project/stackformer)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+<p align="center">
+  <a href="https://badge.fury.io/py/Stackformer"><img src="https://badge.fury.io/py/Stackformer.svg" alt="PyPI version"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.8+-blue.svg" alt="Python 3.8+"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://pepy.tech/project/stackformer"><img src="https://pepy.tech/badge/stackformer" alt="Downloads"></a>
+  <a href="https://github.com/psf/black"><img src="https://img.shields.io/badge/code%20style-black-000000.svg" alt="Code style: black"></a>
+</p>
 
 **A comprehensive, modular transformer library featuring state-of-the-art architectures from OpenAI, Meta, and cutting-edge research.**
 
