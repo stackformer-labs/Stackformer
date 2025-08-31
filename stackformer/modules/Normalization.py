@@ -58,7 +58,7 @@ class LayerNormalization(nn.Module):
         output = self.weight * normalized_x + self.bias
         return output.to(device=x.device, dtype=x.dtype)
 
-class RMSNormilization(nn.Module):
+class RMSNormalization(nn.Module):
     """
     Applies RMS Layer Normalization over the last dimension of the input tensor.
 

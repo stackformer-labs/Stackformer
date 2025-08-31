@@ -7,7 +7,6 @@
   <a href="https://badge.fury.io/py/Stackformer"><img src="https://badge.fury.io/py/Stackformer.svg" alt="PyPI version"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.8+-blue.svg" alt="Python 3.8+"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
-  <a href="https://pepy.tech/project/stackformer"><img src="https://pepy.tech/badge/stackformer" alt="Downloads"></a>
   <a href="https://github.com/psf/black"><img src="https://img.shields.io/badge/code%20style-black-000000.svg" alt="Code style: black"></a>
 </p>
 
@@ -20,7 +19,7 @@ Stackformer provides production-ready implementations of modern transformer arch
 ## ✨ Why Stackformer Leads the Pack
 
 🏗️ **Complete Architecture Zoo** - GPT-1/2, LLaMA-1/2, and custom transformers  
-🔬 **12+ Attention Mechanisms** - From basic self-attention to advanced Group Query and Linear Attention  
+🔬 **10 Attention Mechanisms** - From basic self-attention to advanced Group Query and Linear Attention  
 ⚡ **Modern Optimizations** - RoPE, RMSNorm, SwiGLU, KV-caching, and more  
 🧪 **Research-Ready** - Mix and match components to create novel architectures  
 📚 **Educational Excellence** - Crystal-clear implementations perfect for learning  
@@ -38,10 +37,9 @@ Stackformer provides production-ready implementations of modern transformer arch
 - **LLaMA-2** - Enhanced LLaMA with improved training
 - **Custom Transformer** - Build your own architecture
 
-### 🎯 **Attention Mechanisms (12+ Variants)**
+### 🎯 **Attention Mechanisms (10 Variants)**
 - **Self Attention** - Basic scaled dot-product attention
 - **Multi-Head Attention** - Parallel attention heads
-- **Multi-Head + RoPE** - Rotary Position Embeddings integration
 - **Cross Multi-Head** - For encoder-decoder architectures
 - **Multi-Query Attention** - Shared key-value heads (PaLM-style)
 - **Group Query Attention** - LLaMA-2 style efficient attention

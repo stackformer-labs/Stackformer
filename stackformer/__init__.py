@@ -21,7 +21,7 @@ from .modules.Attention import kv_cache_group_query
 
 # --- Normalization layers ---
 from .modules.Normalization import LayerNormalization
-from .modules.Normalization import RMSNormilization
+from .modules.Normalization import RMSNormalization
 
 # --- Feed Forward layers ---
 from .modules.Feed_forward import FF_ReLU

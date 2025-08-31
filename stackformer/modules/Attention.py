@@ -6,7 +6,6 @@ transformer architectures. It includes various self-attention and cross-attentio
 modules such as:
 
 - Single-head and Multi-head Self-Attention
-- Multi-head Attention with Rotary Positional Embeddings (RoPE)
 - Multi-Query and Grouped Query Attention (MQA, GQA)
 - Linear and Local Attention for efficient long-sequence modeling
 - Cross-Attention for encoder-decoder architectures
@@ -17,6 +16,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from position_embedding import RoPE
 
 class Self_Attention(nn.Module):
     """
@@ -162,7 +162,7 @@ class Multi_Head_Attention(nn.Module):
             self._causal_mask_cache[seq_len] = mask
         return self._causal_mask_cache[seq_len]
 
-    def forward(self, x, mask=True):
+    def forward(self, x, mask=True, rope=False):
         """
         Computes the multi-head self-attention output for input tensor x.
 
@@ -188,7 +188,13 @@ class Multi_Head_Attention(nn.Module):
         q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
         k = k.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
-
+        
+        # Applay RoPE for Q and K
+        if rope:
+            Rope = RoPE(head_dim=self.head_dim, seq_len=T)
+            q = Rope(q)
+            k = Rope(k)
+        
         # Compute scaled dot-product attention scores
         att = (q @ k.transpose(-2, -1)) * self.scale  # Shape: (B, num_heads, T, T)
 
@@ -209,159 +215,6 @@ class Multi_Head_Attention(nn.Module):
 
         # Final linear projection
         return self.out_proj(out)  # (B, T, C)
-
-class Multi_Head_Attention_with_RoPE(nn.Module):
-    """
-    Implements multi-head self-attention with Rotary Positional Embeddings (RoPE)
-    for encoding relative positional information. Supports causal masking and dropout.
-
-    Args:
-        embed_dim (int): Total embedding dimension of the model (divided among heads).
-        num_heads (int): Number of attention heads.
-        dropout (float): Dropout probability applied to attention scores.
-        device (str): Device for computation ('cpu' or 'cuda').
-        dtype (torch.dtype): Data type for model weights and activations.
-    """
-    def __init__(self, embed_dim, num_heads, dropout=0.1, device='cpu', dtype=torch.float32):
-        super().__init__()
-        assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
-
-        self.embed_dim = embed_dim
-        self.num_heads = num_heads
-        self.head_dim = embed_dim // num_heads
-        self.scale = 1.0 / math.sqrt(self.head_dim)
-        self.device = device
-        self.dtype = dtype
-
-        # Linear layer to compute Q, K, V in one shot
-        self.qkv_proj = nn.Linear(embed_dim, 3 * embed_dim, bias=False, device=device, dtype=dtype)
-
-        # Output projection layer
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
-
-        self.dropout = nn.Dropout(dropout)
-
-        # Cache for causal attention masks
-        self._causal_mask_cache = {}
-
-    def _get_or_create_causal_mask(self, seq_len):
-        """
-        Returns a cached or newly created causal mask for attention.
-
-        Args:
-            seq_len (int): Sequence length.
-
-        Returns:
-            torch.Tensor: A boolean tensor of shape (seq_len, seq_len).
-        """
-        if seq_len not in self._causal_mask_cache:
-            mask = torch.triu(
-                torch.ones(seq_len, seq_len, dtype=torch.bool, device=self.device),
-                diagonal=1
-            )
-            self._causal_mask_cache[seq_len] = mask
-        return self._causal_mask_cache[seq_len]
-
-    def _precompute_theta_position_frequency(self, head_dim, seq_len, theta=10000.0):
-        """
-        Precomputes rotary position encodings as complex exponentials.
-
-        Args:
-            head_dim (int): Dimension of each attention head.
-            seq_len (int): Sequence length.
-            theta (float): Base for exponential frequency (default: 10000).
-
-        Returns:
-            torch.Tensor: Complex tensor of shape (seq_len, head_dim // 2)
-        """
-        assert head_dim % 2 == 0, "head_dim must be even for complex RoPE"
-
-        # Inverse frequency terms
-        theta_numerator = torch.arange(0, head_dim, 2, device=self.device)
-        inv_freq = 1.0 / (theta ** (theta_numerator / head_dim))
-
-        # Outer product of positions and frequencies
-        positions = torch.arange(seq_len, device=self.device)
-        freqs = torch.outer(positions, inv_freq)
-
-        # Convert to complex exponential form: exp(i * freq)
-        freq_complex = torch.polar(torch.ones_like(freqs), freqs)  # Shape: (seq_len, head_dim // 2)
-        return freq_complex
-
-    def _apply_rotary_position_embedding(self, x, freq_complex):
-        """
-        Applies RoPE to input tensor using precomputed frequencies.
-
-        Args:
-            x (torch.Tensor): Input tensor of shape (B, num_heads, T, head_dim)
-            freq_complex (torch.Tensor): Complex frequencies of shape (T, head_dim//2)
-
-        Returns:
-            torch.Tensor: Tensor with RoPE applied, same shape as input
-        """
-        B, num_heads, T, dim = x.shape
-        assert dim % 2 == 0, "head_dim must be even to apply RoPE"
-
-        # Convert to complex by pairing dimensions
-        x = x.view(B, num_heads, T, dim // 2, 2)
-        x_complex = torch.view_as_complex(x)  # Shape: (B, num_heads, T, dim // 2)
-
-        # Expand freq to match x_complex shape
-        freq = freq_complex[:T].unsqueeze(0).unsqueeze(0)  # (1, 1, T, dim // 2)
-
-        # Elementwise complex multiplication (rotation)
-        x_rotated = x_complex * freq  # (B, num_heads, T, dim // 2)
-
-        # Convert back to real
-        x_out = torch.view_as_real(x_rotated).view(B, num_heads, T, dim)
-        return x_out.to(dtype=self.dtype, device=self.device)
-
-    def forward(self, x, mask=True):
-        """
-        Forward pass for multi-head attention with RoPE.
-
-        Args:
-            x (torch.Tensor): Input tensor of shape (B, T, C).
-            mask (bool): Whether to apply causal attention mask.
-
-        Returns:
-            torch.Tensor: Output tensor of shape (B, T, C).
-        """
-        B, T, C = x.shape
-        x = x.to(dtype=self.dtype, device=self.device)
-
-        # Compute Q, K, V
-        qkv = self.qkv_proj(x)  # (B, T, 3*C)
-        q, k, v = qkv.chunk(3, dim=-1)  # Each: (B, T, C)
-
-        # Reshape for multi-head attention: (B, T, C) → (B, num_heads, T, head_dim)
-        q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
-        k = k.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
-        v = v.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
-
-        # Precompute rotary frequencies and apply RoPE
-        freqs = self._precompute_theta_position_frequency(self.head_dim, T)
-        q = self._apply_rotary_position_embedding(q, freqs)
-        k = self._apply_rotary_position_embedding(k, freqs)
-
-        # Scaled dot-product attention
-        att = (q @ k.transpose(-2, -1)) * self.scale  # (B, num_heads, T, T)
-
-        # Apply causal mask if needed
-        if mask:
-            causal_mask = self._get_or_create_causal_mask(T)  # (T, T)
-            att.masked_fill_(causal_mask[None, None, :, :], float('-inf'))
-
-        # Normalize and apply dropout
-        att = F.softmax(att, dim=-1)
-        att = self.dropout(att)
-
-        # Weighted sum of V
-        out = att @ v  # (B, num_heads, T, head_dim)
-
-        # Merge heads and apply final projection
-        out = out.transpose(1, 2).contiguous().view(B, T, C)
-        return self.out_proj(out)
 
 class Cross_MultiHead_Attention(nn.Module):
     """
@@ -522,7 +375,7 @@ class Multi_query_Attention(nn.Module):
             self._causal_mask_cache[seq_len] = mask
         return self._causal_mask_cache[seq_len]
 
-    def forward(self, x, mask=True):
+    def forward(self, x, mask=True, rope=False):
         """
         Forward pass of the Multi-Query Attention layer.
 
@@ -625,7 +478,7 @@ class Group_query_Attention(nn.Module):
             self._causal_mask_cache[seq_len] = mask
         return self._causal_mask_cache[seq_len]
 
-    def forward(self, x, mask=True):
+    def forward(self, x, mask=True, rope=False):
         """
         Args:
             x (Tensor): Input tensor of shape (B, T, C).
@@ -646,6 +499,12 @@ class Group_query_Attention(nn.Module):
         q = q.view(B, T, self.num_query_heads, self.head_dim).transpose(1, 2)  # (B, num_query_heads, T, head_dim)
         k = k.view(B, T, self.num_kv_heads, self.head_dim).transpose(1, 2)     # (B, num_kv_heads, T, head_dim)
         v = v.view(B, T, self.num_kv_heads, self.head_dim).transpose(1, 2)
+        
+        # Applay Rope for Q and K
+        if rope:
+            Rope = RoPE(head_dim=self.head_dim,seq_len=T)
+            q = Rope(q)
+            k = Rope(k)
 
         # Repeat keys and values for each query head group
         k = k.repeat_interleave(self.num_queries_per_kv, dim=1)  # (B, num_query_heads, T, head_dim)
@@ -883,7 +742,7 @@ class Local_Attention(nn.Module):
             self._causal_mask_cache[seq_len] = ~band_mask  # invert: True where disallowed
         return self._causal_mask_cache[seq_len]
 
-    def forward(self, x, mask=True):
+    def forward(self, x, mask=True, rope=False):
         """
         Forward pass for local (sliding window) multi-head self-attention.
 
@@ -906,7 +765,13 @@ class Local_Attention(nn.Module):
         q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)  # (B, H, T, D)
         k = k.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
-
+        
+        # Applay RoPE for Q and K
+        if rope:
+            Rope = RoPE(head_dim=self.head_dim, seq_len=T)
+            q = Rope(q)
+            k = Rope(k)
+        
         # Scaled dot-product
         att = (q @ k.transpose(-2, -1)) * self.scale  # (B, H, T, T)
 
