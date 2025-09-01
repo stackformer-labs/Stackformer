@@ -1,34 +1,10 @@
-"""
-Attention Mechanisms for StackFormer Library
-
-This module provides a comprehensive suite of attention mechanisms used in modern 
-transformer architectures. It includes various self-attention and cross-attention 
-modules such as:
-
-- Single-head and Multi-head Self-Attention
-- Multi-Query and Grouped Query Attention (MQA, GQA)
-- Linear and Local Attention for efficient long-sequence modeling
-- Cross-Attention for encoder-decoder architectures
-- Attention with Key/Value (KV) caching for autoregressive decoding
-"""
-
 import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from position_embedding import RoPE
+from .position_embedding import RoPE
 
 class Self_Attention(nn.Module):
-    """
-    Implements a single-head self-attention mechanism with fused QKV projection,
-    optional causal masking, and dropout for regularization.
-
-    Args:
-        embed_dim (int): The input and output dimensionality of the attention mechanism.
-        dropout (float): Dropout probability applied after the softmax attention weights.
-        device (str): Device to use for tensors ('cpu' or 'cuda').
-        dtype (torch.dtype): Data type for the projection layers (default: torch.float32).
-    """
     def __init__(self, embed_dim, dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
         self.embed_dim = embed_dim
@@ -38,8 +14,10 @@ class Self_Attention(nn.Module):
         # Scaling factor for dot-product attention
         self.scale = 1.0 / math.sqrt(embed_dim)
 
-        # Linear layer that computes Q, K, V in one go: [B, T, 3*embed_dim]
-        self.qkv_proj = nn.Linear(embed_dim, 3 * embed_dim, bias=False, device=device, dtype=dtype)
+        # Linear layer
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
+        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
+        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
         
         # Output projection layer to map attention output back to input dimension
         self.out_proj = nn.Linear(embed_dim, embed_dim, device=device, dtype=dtype)
@@ -52,16 +30,6 @@ class Self_Attention(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_causal_mask(self, seq_len):
-        """
-        Retrieves or creates a causal attention mask of shape (seq_len, seq_len),
-        where positions in the upper triangle (i < j) are masked with True.
-
-        Args:
-            seq_len (int): Length of the sequence.
-
-        Returns:
-            torch.Tensor: A boolean causal mask tensor.
-        """
         if seq_len not in self._causal_mask_cache:
             # Upper triangular mask with True above the diagonal
             mask = torch.triu(
@@ -72,23 +40,13 @@ class Self_Attention(nn.Module):
         return self._causal_mask_cache[seq_len]
 
     def forward(self, x, mask=True):
-        """
-        Performs self-attention over the input sequence.
-
-        Args:
-            x (torch.Tensor): Input tensor of shape (B, T, C), where
-                            B = batch size, T = sequence length, C = embed_dim.
-            mask (bool): If True, applies a causal mask to prevent attention to future tokens.
-
-        Returns:
-            torch.Tensor: Output tensor of shape (B, T, C).
-        """
         B, T, C = x.shape
-
-        x = x.to(device=self.device, dtype=self.qkv_proj.weight.dtype)
+        x = x.to(device=self.device, dtype=self.dtype)
+        
         # Compute queries, keys, and values
-        qkv = self.qkv_proj(x)  # Shape: (B, T, 3*C)
-        q, k, v = qkv.chunk(3, dim=-1)  # Each of shape: (B, T, C)
+        q = self.q_proj(x)  # Shape: (B, T, C)
+        k = self.k_proj(x)
+        v = self.v_proj(x)
 
         # Compute raw attention scores (dot product of Q and K^T)
         att = (q @ k.transpose(1, 2)) * self.scale  # Shape: (B, T, T)
@@ -97,7 +55,7 @@ class Self_Attention(nn.Module):
         if mask:
             causal_mask = self._get_or_create_causal_mask(T)  # Shape: (T, T)
             att.masked_fill_(causal_mask[None, :, :], float('-inf'))
-
+            
         # Normalize attention scores using softmax
         att = F.softmax(att, dim=-1)
         att = self.dropout(att)
@@ -109,19 +67,6 @@ class Self_Attention(nn.Module):
         return self.out_proj(out)  # Shape: (B, T, C)
 
 class Multi_Head_Attention(nn.Module):
-    """
-    Implements multi-head self-attention with fused QKV projection and optional causal masking.
-    
-    Each input token attends to all other tokens (or only past tokens if causal masking is used),
-    using multiple attention heads in parallel.
-
-    Args:
-        embed_dim (int): Total embedding dimension of the model (divided among heads).
-        num_heads (int): Number of parallel attention heads.
-        dropout (float): Dropout probability applied to the attention weights.
-        device (str): Device to store tensors and layers ('cpu' or 'cuda').
-        dtype (torch.dtype): Data type used for weights and computations (default: torch.float32).
-    """
     def __init__(self, embed_dim, num_heads, dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
@@ -131,12 +76,15 @@ class Multi_Head_Attention(nn.Module):
         self.head_dim = embed_dim // num_heads  # Each head gets a slice of the embedding
         self.scale = 1.0 / math.sqrt(self.head_dim)
         self.device = device
+        self.dtype = dtype
 
-        # Fused linear layer to compute Q, K, V simultaneously: [B, T, 3*embed_dim]
-        self.qkv_proj = nn.Linear(embed_dim, 3 * embed_dim, bias=False, device=device, dtype=dtype)
+        # Linear layer
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
+        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
+        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
         
         # Final output projection after attention
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
         
         self.dropout = nn.Dropout(dropout)
 
@@ -144,16 +92,6 @@ class Multi_Head_Attention(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_causal_mask(self, seq_len):
-        """
-        Generates or retrieves a cached causal attention mask of shape (seq_len, seq_len).
-        Ensures that tokens can only attend to themselves and previous tokens.
-
-        Args:
-            seq_len (int): Length of the sequence.
-
-        Returns:
-            torch.Tensor: Boolean mask where True means "mask out".
-        """
         if seq_len not in self._causal_mask_cache:
             mask = torch.triu(
                 torch.ones(seq_len, seq_len, dtype=torch.bool, device=self.device),
@@ -163,25 +101,12 @@ class Multi_Head_Attention(nn.Module):
         return self._causal_mask_cache[seq_len]
 
     def forward(self, x, mask=True, rope=False):
-        """
-        Computes the multi-head self-attention output for input tensor x.
-
-        Args:
-            x (torch.Tensor): Input tensor of shape (B, T, C), where
-                            B = batch size, T = sequence length, C = embed_dim.
-            mask (bool): If True, applies a causal mask to prevent attention to future tokens.
-
-        Returns:
-            torch.Tensor: Output tensor of shape (B, T, C).
-        """
         B, T, C = x.shape
+        x = x.to(device=self.device, dtype=self.dtype)
 
-        # Ensure the input is on the correct device and dtype
-        x = x.to(device=self.device, dtype=self.qkv_proj.weight.dtype)
-
-        # Project to queries, keys, values: shape (B, T, 3*C)
-        qkv = self.qkv_proj(x)
-        q, k, v = qkv.chunk(3, dim=-1)  # Each: (B, T, C)
+        q = self.q_proj(x)  # (B, T, C)
+        k = self.k_proj(x) 
+        v = self.v_proj(x) 
 
         # Reshape for multi-head attention:
         # (B, T, C) → (B, T, num_heads, head_dim) → (B, num_heads, T, head_dim)
@@ -191,7 +116,7 @@ class Multi_Head_Attention(nn.Module):
         
         # Applay RoPE for Q and K
         if rope:
-            Rope = RoPE(head_dim=self.head_dim, seq_len=T)
+            Rope = RoPE(head_dim=self.head_dim, seq_len=T, device=self.device, dtype=self.dtype)
             q = Rope(q)
             k = Rope(k)
         
@@ -217,19 +142,6 @@ class Multi_Head_Attention(nn.Module):
         return self.out_proj(out)  # (B, T, C)
 
 class Cross_MultiHead_Attention(nn.Module):
-    """
-    Implements multi-head cross-attention where the query comes from the input `x`,
-    and the key/value pairs come from a separate `context` input.
-    
-    Useful for encoder-decoder attention in Transformer models.
-
-    Args:
-        embed_dim (int): Total embedding dimension (shared across Q, K, V).
-        num_heads (int): Number of attention heads.
-        dropout (float): Dropout probability on attention weights.
-        device (str): Device to use for tensors and parameters.
-        dtype (torch.dtype): Data type for model parameters and activations.
-    """
     def __init__(self, embed_dim, num_heads, dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
@@ -241,9 +153,10 @@ class Cross_MultiHead_Attention(nn.Module):
         self.device = device
         self.dtype = dtype
 
-        # Linear projections for query and key/value (separate sources)
+        # Linear layer
         self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
-        self.kv_proj = nn.Linear(embed_dim, 2 * embed_dim, bias=False, device=device, dtype=dtype)
+        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
+        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
 
         # Final output projection
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
@@ -253,16 +166,6 @@ class Cross_MultiHead_Attention(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_causal_mask(self, seq_len):
-        """
-        Retrieves or creates a causal attention mask (upper triangular) to
-        prevent attending to future tokens.
-
-        Args:
-            seq_len (int): Sequence length.
-
-        Returns:
-            torch.Tensor: A boolean mask of shape (seq_len, seq_len).
-        """
         if seq_len not in self._causal_mask_cache:
             mask = torch.triu(
                 torch.ones(seq_len, seq_len, dtype=torch.bool, device=self.device),
@@ -272,17 +175,6 @@ class Cross_MultiHead_Attention(nn.Module):
         return self._causal_mask_cache[seq_len]
 
     def forward(self, x, context, mask=True):
-        """
-        Performs cross-attention where queries come from `x` and keys/values from `context`.
-
-        Args:
-            x (torch.Tensor): Query input of shape (B, T, C).
-            context (torch.Tensor): Key/value source input of shape (B, S, C).
-            mask (bool): If True, applies causal masking to attention weights.
-
-        Returns:
-            torch.Tensor: Output tensor of shape (B, T, C).
-        """
         B, T, C = x.shape
         S = context.size(1)  # Length of context sequence
 
@@ -292,9 +184,9 @@ class Cross_MultiHead_Attention(nn.Module):
 
         # Compute Q from x, and K/V from context
         q = self.q_proj(x)  # (B, T, C)
-        kv = self.kv_proj(context)  # (B, S, 2*C)
-        k, v = kv.chunk(2, dim=-1)  # Each: (B, S, C)
-
+        k = self.k_proj(context)
+        v = self.v_proj(context)
+        
         # Reshape to multi-head format
         q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)  # (B, num_heads, T, head_dim)
         k = k.view(B, S, self.num_heads, self.head_dim).transpose(1, 2)  # (B, num_heads, S, head_dim)
@@ -322,20 +214,6 @@ class Cross_MultiHead_Attention(nn.Module):
         return self.out_proj(out)
     
 class Multi_query_Attention(nn.Module):
-    """
-    Implements Multi-Query Attention (MQA), where a single set of keys and values
-    are shared across all attention heads, but each head has its own set of queries.
-
-    This improves memory and compute efficiency compared to full MHA, especially
-    in decoder-only architectures like GPT.
-
-    Args:
-        embed_dim (int): Total input/output embedding dimension.
-        num_heads (int): Number of attention heads (applied to queries only).
-        dropout (float): Dropout probability for attention weights.
-        device (str): Device on which the module will run ('cpu' or 'cuda').
-        dtype (torch.dtype): Data type for model weights and activations.
-    """
     def __init__(self, embed_dim, num_heads, dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
@@ -345,11 +223,15 @@ class Multi_query_Attention(nn.Module):
         self.head_dim = embed_dim // num_heads
         self.scale = 1.0 / math.sqrt(self.head_dim)
         self.device = device
+        self.dtype = dtype
 
         # Projection layers
-        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
-        self.kv_proj = nn.Linear(embed_dim, 2 * self.head_dim, bias=False, device=device, dtype=dtype)
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
+        self.k_proj = nn.Linear(embed_dim, self.head_dim, bias=False, device=device, dtype=self.dtype)
+        self.v_proj = nn.Linear(embed_dim, self.head_dim, bias=False, device=device, dtype=self.dtype)
+        
+        # Output final projection
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
 
         self.dropout = nn.Dropout(dropout)
 
@@ -357,16 +239,6 @@ class Multi_query_Attention(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_causal_mask(self, seq_len):
-        """
-        Retrieves or creates a causal attention mask (upper triangular) to
-        prevent attending to future tokens.
-
-        Args:
-            seq_len (int): Sequence length.
-
-        Returns:
-            torch.Tensor: A boolean mask of shape (seq_len, seq_len).
-        """
         if seq_len not in self._causal_mask_cache:
             mask = torch.triu(
                 torch.ones(seq_len, seq_len, dtype=torch.bool, device=self.device),
@@ -376,24 +248,15 @@ class Multi_query_Attention(nn.Module):
         return self._causal_mask_cache[seq_len]
 
     def forward(self, x, mask=True, rope=False):
-        """
-        Forward pass of the Multi-Query Attention layer.
-
-        Args:
-            x (torch.Tensor): Input tensor of shape (B, T, C).
-            mask (bool): Whether to apply causal masking (default: True).
-
-        Returns:
-            torch.Tensor: Output tensor of shape (B, T, C).
-        """
         B, T, C = x.shape
         x = x.to(device=self.device, dtype=self.q_proj.weight.dtype)
 
         # Project input to queries (multi-head) and shared keys/values (single head)
         q = self.q_proj(x)  # (B, T, C)
-        kv = self.kv_proj(x)  # (B, T, 2 * head_dim)
-        k, v = kv.chunk(2, dim=-1)  # Each: (B, T, head_dim)
-
+        k = self.k_proj(x)  # (B, T, C)
+        v = self.v_proj(x)  # (B, T, C)
+        
+            
         # Reshape queries to multi-head: (B, T, C) -> (B, num_heads, T, head_dim)
         q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
 
@@ -402,6 +265,11 @@ class Multi_query_Attention(nn.Module):
         k = k.unsqueeze(1).expand(B, self.num_heads, T, self.head_dim)
         v = v.unsqueeze(1).expand(B, self.num_heads, T, self.head_dim)
 
+        if rope:
+            Rope = RoPE(head_dim=self.head_dim, seq_len=q.shape[1], device=self.device, dtype=self.dtype)
+            q = Rope(q)
+            k = Rope(k)
+            
         # Scaled dot-product attention
         att = (q @ k.transpose(-2, -1)) * self.scale  # (B, num_heads, T, T)
 
@@ -422,23 +290,7 @@ class Multi_query_Attention(nn.Module):
         return self.out_proj(out)  # Final linear projection
     
 class Group_query_Attention(nn.Module):
-    """
-    Implements Grouped Query Attention (GQA), where the number of query heads 
-    can be higher than the number of key/value heads.
-    
-    This improves memory and compute efficiency while retaining expressiveness.
-    """
-
     def __init__(self, embed_dim, num_query_heads, num_kv_heads, dropout=0.1, device='cpu', dtype=torch.float32):
-        """
-        Args:
-            embed_dim (int): Total embedding dimension.
-            num_query_heads (int): Number of query heads.
-            num_kv_heads (int): Number of key/value heads.
-            dropout (float): Dropout probability applied to attention weights.
-            device (str): Torch device to place the model.
-            dtype (torch.dtype): Data type used in the projections.
-        """
         super().__init__()
         assert embed_dim % num_query_heads == 0, "embed_dim must be divisible by num_query_heads"
         assert num_query_heads % num_kv_heads == 0, "num_query_heads must be divisible by num_kv_heads"
@@ -453,23 +305,14 @@ class Group_query_Attention(nn.Module):
 
         # Projection layers
         self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
-        self.kv_proj = nn.Linear(embed_dim, 2 * num_kv_heads * self.head_dim, bias=False, device=device, dtype=dtype)
+        self.k_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim, bias=False, device=device, dtype=dtype)
+        self.v_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim, bias=False, device=device, dtype=dtype)
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
 
         self.dropout = nn.Dropout(dropout)
         self._causal_mask_cache = {}
 
     def _get_or_create_causal_mask(self, seq_len):
-        """
-        Retrieves or creates a causal attention mask (upper triangular) to
-        prevent attending to future tokens.
-
-        Args:
-            seq_len (int): Sequence length.
-
-        Returns:
-            torch.Tensor: A boolean mask of shape (seq_len, seq_len).
-        """
         if seq_len not in self._causal_mask_cache:
             mask = torch.triu(
                 torch.ones(seq_len, seq_len, dtype=torch.bool, device=self.device),
@@ -479,21 +322,13 @@ class Group_query_Attention(nn.Module):
         return self._causal_mask_cache[seq_len]
 
     def forward(self, x, mask=True, rope=False):
-        """
-        Args:
-            x (Tensor): Input tensor of shape (B, T, C).
-            mask (bool): Whether to apply a causal mask.
-
-        Returns:
-            Tensor of shape (B, T, C) after applying grouped query attention.
-        """
         B, T, C = x.shape
         x = x.to(device=self.device, dtype=self.q_proj.weight.dtype)
 
         # Project Q, K, V
         q = self.q_proj(x)  # (B, T, C)
-        kv = self.kv_proj(x)  # (B, T, 2 * num_kv_heads * head_dim)
-        k, v = kv.chunk(2, dim=-1)
+        k = self.k_proj(x) 
+        v = self.v_proj(x) 
 
         # Reshape projections
         q = q.view(B, T, self.num_query_heads, self.head_dim).transpose(1, 2)  # (B, num_query_heads, T, head_dim)
@@ -526,19 +361,6 @@ class Group_query_Attention(nn.Module):
         return self.out_proj(out)
     
 class Linear_Attention(nn.Module):
-    """
-    Linear Attention module using kernel-based approximation for efficient attention.
-    Implements a feature map-based linearized variant of self-attention using ELU+1 as the kernel.
-    Inspired by "Transformers are RNNs: Fast Autoregressive Transformers with Linear Attention".
-
-    Args:
-        embed_dim (int): Input and output embedding dimension.
-        num_heads (int): Number of attention heads.
-        dropout (float): Dropout probability.
-        eps (float): Small epsilon for numerical stability during division.
-        device (str): Device to place the module on.
-        dtype (torch.dtype): Tensor data type.
-    """
     def __init__(self, embed_dim, num_heads, dropout, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
@@ -560,15 +382,6 @@ class Linear_Attention(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        """
-        Forward pass for linear attention.
-
-        Args:
-            x (torch.Tensor): Input tensor of shape (B, T, embed_dim)
-
-        Returns:
-            torch.Tensor: Output tensor of shape (B, T, embed_dim)
-        """
         B, T, _ = x.shape
 
         # Compute Q, K, V and reshape for multi-head attention
@@ -595,19 +408,6 @@ class Linear_Attention(nn.Module):
         return self.dropout(self.out_proj(out))
     
 class Multi_latent_Attention(nn.Module):
-    """
-    Multi-Latent Attention layer with separate learned compression for Q and KV streams.
-    Useful for reducing computational/memory cost while preserving expressiveness.
-    
-    Args:
-        embed_dim (int): Dimension of input/output embeddings.
-        q_compressed_dim (int): Latent compression dimension for queries.
-        kv_compressed_dim (int): Latent compression dimension for keys and values.
-        num_heads (int): Number of attention heads.
-        device (str): Device for tensors and modules.
-        dtype (torch.dtype): Tensor type.
-        dropout (float): Dropout probability.
-    """
     def __init__(self, embed_dim, q_compressed_dim, kv_compressed_dim, num_heads,
                 device='cpu', dtype=torch.float32, dropout=0.0):
         super().__init__()
@@ -634,13 +434,6 @@ class Multi_latent_Attention(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        """
-        Args:
-            x (torch.Tensor): Input tensor of shape (B, T, embed_dim)
-
-        Returns:
-            torch.Tensor: Output of shape (B, T, embed_dim)
-        """
         B, T, _ = x.shape
 
         # Compress and reconstruct queries
@@ -671,32 +464,6 @@ class Multi_latent_Attention(nn.Module):
         return out
 
 class Local_Attention(nn.Module):
-    """
-    Local (Sliding Window) Multi-Head Self-Attention Layer.
-
-    This module implements efficient **local attention** where each token attends only
-    to a fixed-size window of previous tokens (including itself), enabling scalable
-    attention for long sequences without full quadratic cost.
-
-    Args:
-        embed_dim (int): Total embedding dimension of the model.
-        num_heads (int): Number of attention heads.
-        window_size (int): Local attention window size. Each token attends to up to
-            (window_size - 1) tokens before it.
-        dropout (float): Dropout probability applied to attention weights.
-        device (str): Device to run the module on (e.g., 'cpu' or 'cuda').
-        dtype (torch.dtype): Data type for model parameters (e.g., torch.float32).
-
-    Raises:
-        AssertionError: If embed_dim is not divisible by num_heads.
-        AssertionError: If window_size < 1 (would block all attention).
-
-    Example:
-        >>> attn = Local_Attention(embed_dim=256, num_heads=8, window_size=16)
-        >>> x = torch.randn(2, 64, 256)  # (batch_size, seq_len, embed_dim)
-        >>> out = attn(x)
-        >>> out.shape  # torch.Size([2, 64, 256])
-    """
     def __init__(self, embed_dim, num_heads, window_size, dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
 
@@ -709,29 +476,21 @@ class Local_Attention(nn.Module):
         self.head_dim = embed_dim // num_heads
         self.scale = 1.0 / math.sqrt(self.head_dim)
         self.device = device
+        self.dtype = dtype
 
-        # QKV fused projection
-        self.qkv_proj = nn.Linear(embed_dim, 3 * embed_dim, bias=False, device=device, dtype=dtype)
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
+        # QKV projection
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
+        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
+        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
+        
+        # Final output projection
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
         self.dropout = nn.Dropout(dropout)
 
         # Cache causal masks for efficiency
         self._causal_mask_cache = {}
 
     def _get_or_create_sliding_window_mask(self, seq_len):
-        """
-        Creates or retrieves a cached local (sliding window) causal attention mask.
-
-        For each position `i`, allows attention to tokens in range
-        `[max(0, i - window_size + 1), i]`.
-
-        Args:
-            seq_len (int): Sequence length of the input.
-
-        Returns:
-            torch.BoolTensor: Shape (seq_len, seq_len). `True` indicates
-            positions to be masked (not attended).
-        """
         if seq_len not in self._causal_mask_cache:
             full_mask = torch.triu(
                 torch.ones(seq_len, seq_len, dtype=torch.bool, device=self.device),
@@ -743,23 +502,13 @@ class Local_Attention(nn.Module):
         return self._causal_mask_cache[seq_len]
 
     def forward(self, x, mask=True, rope=False):
-        """
-        Forward pass for local (sliding window) multi-head self-attention.
-
-        Args:
-            x (torch.FloatTensor): Input tensor of shape (B, T, C), where
-                B = batch size, T = sequence length, C = embedding dimension.
-            mask (bool): If True, applies the local causal mask.
-
-        Returns:
-            torch.FloatTensor: Output tensor of shape (B, T, C).
-        """
         B, T, C = x.shape
-        x = x.to(device=self.device, dtype=self.qkv_proj.weight.dtype)
+        x = x.to(device=self.device, dtype=self.q_proj.weight.dtype)
 
-        # Fused QKV projection
-        qkv = self.qkv_proj(x)  # (B, T, 3*C)
-        q, k, v = qkv.chunk(3, dim=-1)
+        # Project Q, K, V
+        q = self.q_proj(x)  # (B, T, C)
+        k = self.k_proj(x) 
+        v = self.v_proj(x) 
 
         # Split heads
         q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)  # (B, H, T, D)
@@ -768,7 +517,7 @@ class Local_Attention(nn.Module):
         
         # Applay RoPE for Q and K
         if rope:
-            Rope = RoPE(head_dim=self.head_dim, seq_len=T)
+            Rope = RoPE(head_dim=self.head_dim, seq_len=T, device=self.device, dtype=self.dtype)
             q = Rope(q)
             k = Rope(k)
         
@@ -789,32 +538,6 @@ class Local_Attention(nn.Module):
         return self.out_proj(out)
 
 class kv_cache_multihead(nn.Module):
-    """
-    Multi-Head Self-Attention with KV Caching and Rotary Position Embeddings (RoPE).
-
-    This module supports autoregressive decoding by caching keys and values across forward passes.
-    Ideal for GPT-style architectures.
-
-    Features:
-        - Fused QKV projection.
-        - Rotary position embedding (RoPE).
-        - Scaled dot-product attention with causal masking.
-        - KV caching for fast inference.
-
-    Args:
-        embed_dim (int): Total embedding dimension.
-        num_heads (int): Number of attention heads.
-        batch_size (int): Fixed batch size for cache allocation.
-        kv_seq_len (int): Maximum KV cache sequence length.
-        dropout (float): Dropout on attention scores.
-        device (str): Device to initialize weights and buffers on.
-        dtype (torch.dtype): Precision type for parameters.
-
-    Example:
-        attn = KVCacheMultihead(embed_dim=256, num_heads=8, batch_size=4, kv_seq_len=1024)
-        out = attn(x, start_pos=0)
-        out.shape  # (4, 1024, 256)
-    """
     def __init__(self, embed_dim, num_heads, batch_size, kv_seq_len, dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
@@ -825,8 +548,13 @@ class kv_cache_multihead(nn.Module):
         self.scale = 1.0 / math.sqrt(self.head_dim)
         self.device = device
         self.dtype = dtype
-
-        self.qkv_proj = nn.Linear(embed_dim, 3 * embed_dim, bias=False, device=device, dtype=dtype)
+        
+        #  QKV projection
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
+        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
+        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
+        
+        # Final output projection
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
         self.dropout = nn.Dropout(dropout)
 
@@ -837,9 +565,6 @@ class kv_cache_multihead(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_causal_mask(self, tgt_len: int, src_len: int):
-        """
-        Returns a [tgt_len, src_len] upper triangular causal mask (True = masked).
-        """
         key = (tgt_len, src_len)
         if key not in self._causal_mask_cache:
             mask = torch.triu(torch.ones(tgt_len, src_len, dtype=torch.bool, device=self.device), diagonal=1)
@@ -847,17 +572,6 @@ class kv_cache_multihead(nn.Module):
         return self._causal_mask_cache[key]
 
     def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, theta: float = 10000.0):
-        """
-        Precomputes rotary position encodings as complex exponentials.
-
-        Args:
-            head_dim (int): Dimension of each attention head.
-            seq_len (int): Sequence length.
-            theta (float): Base for exponential frequency (default: 10000).
-
-        Returns:
-            torch.Tensor: Complex tensor of shape (seq_len, head_dim // 2)
-        """
         assert head_dim % 2 == 0, "head_dim must be even for RoPE"
 
         dim_half = head_dim // 2
@@ -869,16 +583,6 @@ class kv_cache_multihead(nn.Module):
         return freq_complex  # (seq_len, dim_half)
 
     def _apply_rotary_position_embedding(self, x: torch.Tensor, freq_complex: torch.Tensor):
-        """
-        Applies RoPE to input tensor using precomputed frequencies.
-
-        Args:
-            x (torch.Tensor): Input tensor of shape (B, num_heads, T, head_dim)
-            freq_complex (torch.Tensor): Complex frequencies of shape (T, head_dim//2)
-
-        Returns:
-            torch.Tensor: Tensor with RoPE applied, same shape as input
-        """
         B, H, T, D = x.shape
         assert D % 2 == 0, "head_dim must be even for RoPE"
 
@@ -892,24 +596,13 @@ class kv_cache_multihead(nn.Module):
         return x_out.to(dtype=self.dtype, device=self.device)
 
     def forward(self, x: torch.Tensor, start_pos: int, mask: bool = True, rope: bool = True):
-        """
-        Forward pass with optional RoPE and KV caching.
-
-        Args:
-            x (Tensor): Input of shape (B, T, C)
-            start_pos (int): Start position for inserting into KV cache.
-            mask (bool): Whether to apply causal mask.
-            rope (bool): Whether to apply rotary position embeddings.
-
-        Returns:
-            Tensor: Output of shape (B, T, C)
-        """
         B, T, C = x.shape
         assert C == self.embed_dim, "Input embed_dim mismatch"
 
         # Project input to Q, K, V
-        qkv = self.qkv_proj(x)  # (B, T, 3*C)
-        q, k, v = qkv.chunk(3, dim=-1)
+        q = self.q_proj(x)  # (B, T, C)
+        k = self.k_proj(x)  # (B, T, C)
+        v = self.v_proj(x)  # (B, T, C)
 
         # Reshape to multi-head format
         q = q.view(B, T, self.num_heads, self.head_dim) # (B, T, H, D)
@@ -951,20 +644,7 @@ class kv_cache_multihead(nn.Module):
         out = context.transpose(1, 2).contiguous().view(B, T, C)
         return self.out_proj(out)
 
-class kv_cache_group_query(nn.Module):
-    """
-    Implements Grouped Query Attention (GQA) with rotary positional embeddings (RoPE)
-    and KV caching for efficient autoregressive decoding.
-
-    Args:
-        embed_dim (int): Total embedding dimension.
-        num_query_heads (int): Number of query heads.
-        num_kv_heads (int): Number of key/value heads (shared across query heads).
-        dropout (float): Dropout probability on attention weights.
-        device (str): Target device for computation.
-        dtype (torch.dtype): Data type used for model parameters and computation.
-    """
-    
+class kv_cache_group_query(nn.Module):  
     def __init__(self, embed_dim, num_query_heads, num_kv_heads, kv_seq_len, batch_size, dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
         assert embed_dim % num_query_heads == 0, "embed_dim must be divisible by num_query_heads"
@@ -982,7 +662,8 @@ class kv_cache_group_query(nn.Module):
 
         # Linear projections: Q from full dim, KV from reduced dim
         self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
-        self.kv_proj = nn.Linear(embed_dim, 2 * num_kv_heads * self.head_dim, bias=False, device=device, dtype=dtype)
+        self.k_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim, bias=False, device=device, dtype=dtype)
+        self.v_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim, bias=False, device=device, dtype=dtype)
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
 
         self.dropout = nn.Dropout(dropout)
@@ -993,10 +674,6 @@ class kv_cache_group_query(nn.Module):
         self.cache_values = torch.zeros(batch_size, kv_seq_len * 2, num_kv_heads, self.head_dim, device=device, dtype=dtype)
 
     def _get_or_create_causal_mask(self, seq_len):
-        """
-        Returns a cached upper-triangular causal mask of shape (seq_len, seq_len).
-        Prevents attending to future tokens.
-        """
         if seq_len not in self._causal_mask_cache:
             mask = torch.triu(
                 torch.ones(seq_len, seq_len, dtype=torch.bool, device=self.device),
@@ -1006,9 +683,6 @@ class kv_cache_group_query(nn.Module):
         return self._causal_mask_cache[seq_len]
 
     def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, theta: float = 10000.0):
-        """
-        Precomputes RoPE (rotary positional embedding) frequency matrix using complex numbers.
-        """
         assert head_dim % 2 == 0, "head_dim must be even for RoPE"
         dim_half = head_dim // 2
         inv_freq = 1.0 / (theta ** (torch.arange(0, dim_half, device=self.device) / dim_half))
@@ -1018,10 +692,6 @@ class kv_cache_group_query(nn.Module):
         return freq_complex  # (seq_len, dim_half)
 
     def _apply_rotary_position_embedding(self, x: torch.Tensor, freq_complex: torch.Tensor):
-        """
-        Applies RoPE to tensor `x` using precomputed complex frequencies.
-        `x`: shape (B, H, T, D)
-        """
         B, H, T, D = x.shape
         assert D % 2 == 0, "head_dim must be even for RoPE"
 
@@ -1033,24 +703,13 @@ class kv_cache_group_query(nn.Module):
         return x_out.to(dtype=self.dtype, device=self.device)
 
     def forward(self, x, start_pos, mask=True, rope=True):
-        """
-        Forward pass for grouped-query attention with rotary positional embedding and KV cache.
-
-        Args:
-            x (Tensor): Input of shape (B, T, C)
-            start_pos (int): Start position in KV cache for current chunk
-            mask (bool): Whether to apply causal mask
-            rope (bool): Whether to apply rotary position embedding
-        Returns:
-            Tensor of shape (B, T, C)
-        """
         B, T, C = x.shape
         x = x.to(device=self.device, dtype=self.q_proj.weight.dtype)
 
         # Project input to Q, K, V
         q = self.q_proj(x)  # (B, T, C)
-        kv = self.kv_proj(x)  # (B, T, 2 * num_kv_heads * head_dim)
-        k, v = kv.chunk(2, dim=-1)  # (B, T, num_kv_heads * head_dim)
+        k = self.k_proj(x)  # (B, T, num_kv_heads * head_dim)
+        v = self.v_proj(x)
 
         # Reshape to multi-head form
         q = q.view(B, T, self.num_query_heads, self.head_dim) # (B, T, num_query_heads, head_dim)

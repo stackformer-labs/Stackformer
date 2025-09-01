@@ -2,7 +2,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from stackformer.modules.Attention import kv_cache_group_query, Multi_Head_Attention_with_RoPE
+from stackformer.modules.Attention import Multi_Head_Attention,kv_cache_group_query
 from stackformer.modules.Feed_forward import FF_SwiGLU
 from stackformer.modules.Normalization import RMSNormalization
 from stackformer.generate import text_generate
@@ -18,15 +18,15 @@ Norm: pre norm (RMS norm)
 class llama_1_Block(nn.Module):
     def __init__(self, embed_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
-        self.attention = Multi_Head_Attention_with_RoPE(embed_dim, num_heads, dropout, device=device, dtype=dtype)
-        self.norm1 = RMSNormalization(embed_dim, eps=eps)
+        self.attention = Multi_Head_Attention(embed_dim, num_heads, dropout, device=device, dtype=dtype)
+        self.norm1 = RMSNormalization(embed_dim, eps=eps, device=device,dtype=dtype)
         self.FF_SwiGLU = FF_SwiGLU(embed_dim, hidden_dim, dropout, device=device, dtype=dtype)
-        self.norm2 = RMSNormalization(embed_dim, eps=eps)
+        self.norm2 = RMSNormalization(embed_dim, eps=eps, device=device,dtype=dtype)
         
     def forward(self, x):
         residual = x
         x = self.norm1(x)
-        x = self.attention(x)
+        x = self.attention(x,rope=True)
         x = x + residual
         
         residual = x
@@ -66,7 +66,7 @@ class llama_1(nn.Module):
                                     hidden_dim=hidden_dim,eps=eps,device=self.device,dtype=self.dtype)
         
         # --- Final norm        
-        self.final_norm = RMSNormalization(embed_dim, eps=eps)
+        self.final_norm = RMSNormalization(embed_dim, eps=eps, device=device,dtype=dtype)
         
         # --- Output Projection ---
         self.lm_head = nn.Linear(embed_dim, vocab_size, bias=False, dtype=self.dtype, device=self.device)
@@ -95,10 +95,10 @@ class llama_2_Block(nn.Module):
     def __init__(self, embed_dim, num_query_heads, num_kv_heads, batch_size, kv_seq_len, hidden_dim,
                 eps=1e-5, dropout=0.1, dtype=torch.float32, device='cpu'):
         super().__init__()
-        self.attn_norm = RMSNormalization(embed_dim, eps=eps)
-        self.ff_norm = RMSNormalization(embed_dim, eps=eps)
+        self.attn_norm = RMSNormalization(embed_dim, eps=eps, device=device,dtype=dtype)
         self.attn = kv_cache_group_query(embed_dim=embed_dim, num_query_heads=num_query_heads, num_kv_heads=num_kv_heads,
                                         batch_size=batch_size, kv_seq_len=kv_seq_len, dtype=dtype, dropout=dropout, device=device)
+        self.ff_norm = RMSNormalization(embed_dim, eps=eps, device=device,dtype=dtype)
         self.ff = FF_SwiGLU(embed_dim=embed_dim, hidden_dim=hidden_dim, device=device, dtype=dtype)
 
     def forward(self, x, start_pos):
@@ -144,7 +144,7 @@ class llama_2(nn.Module):
                             num_kv_heads=num_kv_heads, batch_size=batch_size, kv_seq_len=kv_seq_len,
                             hidden_dim=hidden_dim, eps=eps, dropout=dropout, dtype=dtype, device=device)
 
-        self.final_norm = RMSNormalization(embed_dim, eps=eps)
+        self.final_norm = RMSNormalization(embed_dim, eps=eps, device=device,dtype=dtype)
         self.lm_head = nn.Linear(embed_dim, vocab_size, bias=False, dtype=dtype, device=device)
 
     def forward(self, input_ids, start_pos=0):

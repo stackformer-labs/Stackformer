@@ -9,7 +9,6 @@ from .modules.position_embedding import RoPE
 # --- Attention mechanisms ---
 from .modules.Attention import Self_Attention
 from .modules.Attention import Multi_Head_Attention
-from .modules.Attention import Multi_Head_Attention_with_RoPE
 from .modules.Attention import Cross_MultiHead_Attention
 from .modules.Attention import Multi_query_Attention
 from .modules.Attention import Group_query_Attention

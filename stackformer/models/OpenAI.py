@@ -21,9 +21,9 @@ class GPT_1_Block(nn.Module):
     def __init__(self, embed_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
         self.attention = Multi_Head_Attention(embed_dim, num_heads, dropout, device=device, dtype=dtype)
-        self.norm1 = LayerNormalization(embed_dim, eps=eps)
+        self.norm1 = LayerNormalization(embed_dim, eps=eps, device=device,dtype=dtype)
         self.FF_GELU = FF_GELU(embed_dim, hidden_dim, dropout, device=device, dtype=dtype)
-        self.norm2 = LayerNormalization(embed_dim, eps=eps)
+        self.norm2 = LayerNormalization(embed_dim, eps=eps, device=device,dtype=dtype)
         
     def forward(self, x):
         residual = x
@@ -64,14 +64,14 @@ class GPT_1(nn.Module):
         self.embedding = nn.Embedding(vocab_size, embed_dim, dtype=self.dtype, device=self.device)
         
         # --- absolute position embedding ---
-        self.position_embedding = AbsolutePositionEmbedding(embed_dim=embed_dim, seq_len=seq_len)
+        self.position_embedding = AbsolutePositionEmbedding(embed_dim=embed_dim, seq_len=seq_len, device=device,dtype=dtype)
         
         # --- Encoder ---
         self.encoder = GPT_1_Encoder(num_layers=num_layers,embed_dim=embed_dim,num_heads=num_heads,dropout=dropout,
             hidden_dim=hidden_dim,eps=eps,device=self.device,dtype=self.dtype)
         
         # --- Final norm        
-        self.final_norm = LayerNormalization(embed_dim, eps=eps)
+        self.final_norm = LayerNormalization(embed_dim, eps=eps, device=device,dtype=dtype)
         
         # --- Output Projection ---
         self.lm_head = nn.Linear(embed_dim, vocab_size, bias=False, dtype=self.dtype, device=self.device)
@@ -103,9 +103,9 @@ class GPT_2_Block(nn.Module):
     def __init__(self, embed_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
         self.attention = Multi_Head_Attention(embed_dim, num_heads, dropout, device=device, dtype=dtype)
-        self.norm1 = LayerNormalization(embed_dim, eps=eps)
+        self.norm1 = LayerNormalization(embed_dim, eps=eps, device=device,dtype=dtype)
         self.FF_GELU = FF_GELU(embed_dim, hidden_dim, dropout, device=device, dtype=dtype)
-        self.norm2 = LayerNormalization(embed_dim, eps=eps)
+        self.norm2 = LayerNormalization(embed_dim, eps=eps, device=device,dtype=dtype)
         
     def forward(self, x):
         residual = x
@@ -146,17 +146,14 @@ class GPT_2(nn.Module):
         self.embedding = nn.Embedding(vocab_size, embed_dim, dtype=self.dtype, device=self.device)
         
         # --- Adaptive position embedding ---
-        self.position_embedding = AbsolutePositionEmbedding(
-            embed_dim=embed_dim, 
-            seq_len=seq_len
-        )
+        self.position_embedding = AbsolutePositionEmbedding(embed_dim=embed_dim, seq_len=seq_len, device=device,dtype=dtype)
         
         # --- Encoder ---
         self.encoder = GPT_2_Encoder(num_layers=num_layers,embed_dim=embed_dim,num_heads=num_heads,dropout=dropout,
             hidden_dim=hidden_dim,eps=eps,device=self.device,dtype=self.dtype)
         
         # --- Final norm        
-        self.final_norm = LayerNormalization(embed_dim, eps=eps)
+        self.final_norm = LayerNormalization(embed_dim, eps=eps, device=device,dtype=dtype)
         
         # --- Output Projection ---
         self.lm_head = nn.Linear(embed_dim, vocab_size, bias=False, 

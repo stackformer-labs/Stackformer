@@ -90,10 +90,12 @@ class SinusoidalPositionalEmbedding(nn.Module):
         >>> x = torch.randn(4, 32, 128)
         >>> pos = pe(x)  # (4, 32, 128)
     """
-    def __init__(self, seq_len, embed_dim):
+    def __init__(self, seq_len, embed_dim, device='cpu', dtype=torch.float32):
         super().__init__()
         self.seq_len = seq_len
         self.embed_dim = embed_dim
+        self.device=device
+        self.dtype = dtype
 
         position = torch.arange(0, seq_len).unsqueeze(1)  # (T, 1)
         div_term = torch.exp(torch.arange(0, embed_dim, 2) * -(math.log(10000.0) / embed_dim))  # (D/2)
@@ -102,12 +104,12 @@ class SinusoidalPositionalEmbedding(nn.Module):
         pe[:, 0::2] = torch.sin(position * div_term)  # even dims
         pe[:, 1::2] = torch.cos(position * div_term)  # odd dims
 
-        self.register_buffer("pe", pe)
+        self.register_buffer("pe", pe, device=self.device, dtype=self.dtype)
 
     def forward(self, x):
         batch_size, seq_len = x.shape[0], x.shape[1]
         out = self.pe[:seq_len].unsqueeze(0).expand(batch_size, seq_len, -1)
-        return out.to(device=x.device, dtype=x.dtype)
+        return out.to(device=self.device, dtype=self.dtype)
 
 class RoPE(nn.Module):
     """
@@ -163,10 +165,10 @@ class RoPE(nn.Module):
         assert embed_dim % 2 == 0, "embed_dim must be even"
 
         x_reshaped = x.view(batch_size, seq_len, num_head, embed_dim // 2, 2)
-        x_complex = torch.view_as_complex(x_reshaped)  # (B, T, H, D/2)
+        x_complex = torch.view_as_complex(x_reshaped).to(device=x.device)  # (B, T, H, D/2)
 
-        freqs = self.freq_complex[:seq_len].unsqueeze(0).unsqueeze(2)  # (1, T, 1, D/2)
+        freqs = self.freq_complex[:seq_len].unsqueeze(0).unsqueeze(2).to(device=x.device)  # (1, T, 1, D/2)
         x_rotated = x_complex * freqs  # Element-wise complex multiplication
 
         x_out = torch.view_as_real(x_rotated).contiguous().view(batch_size, seq_len, num_head, embed_dim)
-        return x_out.to(device=x.device, dtype=x.dtype)
+        return x_out.to(device=self.device, dtype=self.dtype)

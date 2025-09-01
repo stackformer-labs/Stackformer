@@ -45,18 +45,20 @@ class LayerNormalization(nn.Module):
         >>> x = torch.randn(4, 10, 64)
         >>> output = layer_norm(x)
     """
-    def __init__(self, embed_dim, eps=1e-5):
+    def __init__(self, embed_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
         self.eps = eps
-        self.weight = nn.Parameter(torch.ones(embed_dim))  # gamma
-        self.bias = nn.Parameter(torch.zeros(embed_dim))   # beta
+        self.device = device
+        self.dtype = dtype
+        self.weight = nn.Parameter(torch.ones(embed_dim,device=self.device,dtype=self.dtype))  # gamma
+        self.bias = nn.Parameter(torch.zeros(embed_dim,device=self.device,dtype=self.dtype))   # beta
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        mean = x.mean(dim=-1, keepdim=True)
-        var = x.var(dim=-1, keepdim=True, unbiased=False)
+        mean = x.mean(dim=-1, keepdim=True).to(self.device)
+        var = x.var(dim=-1, keepdim=True, unbiased=False).to(self.device)
         normalized_x = (x - mean) / torch.sqrt(var + self.eps)
         output = self.weight * normalized_x + self.bias
-        return output.to(device=x.device, dtype=x.dtype)
+        return output.to(device=self.device, dtype=self.dtype)
 
 class RMSNormalization(nn.Module):
     """
@@ -83,13 +85,15 @@ class RMSNormalization(nn.Module):
         >>> x = torch.randn(4, 10, 64)
         >>> output = rms_norm(x)
     """
-    def __init__(self, embed_dim, eps=1e-5):
+    def __init__(self, embed_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
         self.eps = eps
-        self.weight = nn.Parameter(torch.ones(embed_dim))  # gamma
+        self.device = device
+        self.dtype = dtype
+        self.weight = nn.Parameter(torch.ones(embed_dim, device=self.device,dtype=self.dtype))  # gamma
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        rms = x.pow(2).mean(-1, keepdim=True).sqrt()
-        normalized_x = x / (rms + self.eps)
+        rms = x.pow(2).mean(-1, keepdim=True).sqrt().to(device=self.device)
+        normalized_x = x / (rms + self.eps).to(device=self.device)
         output = self.weight * normalized_x
-        return output.to(device=x.device, dtype=x.dtype)
+        return output.to(device=self.device, dtype=self.dtype)
