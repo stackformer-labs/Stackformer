@@ -26,7 +26,7 @@ class llama_1_Block(nn.Module):
     def forward(self, x):
         residual = x
         x = self.norm1(x)
-        x = self.attention(x,rope=True)
+        x = self.attention(x)
         x = x + residual
         
         residual = x

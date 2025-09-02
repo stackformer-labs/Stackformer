@@ -112,63 +112,41 @@ class SinusoidalPositionalEmbedding(nn.Module):
         return out.to(device=self.device, dtype=self.dtype)
 
 class RoPE(nn.Module):
-    """
-    Rotary Positional Embedding (RoPE) for attention keys and queries.
-
-    Formula:
-        Let x be split into real and imaginary parts as complex numbers:
-        - Convert x into complex: x_complex = real + i * imag
-        - Apply rotation: x_rotated = x_complex * freq_complex
-        - Convert back to real values: out = real(x_rotated), imag(x_rotated)
-
-    Frequencies:
-        For position p and dimension d:
-            freq[p, d] = 1 / (theta ** (2d / D))
-
-    Args:
-        head_dim (int): Per-head embedding dimension (must be even)
-        seq_len (int): Maximum sequence length
-        theta (float): Base rotation frequency (default: 10000.0)
-        device (str): Device to place precomputed values on
-        dtype (torch.dtype): Data type for the output
-
-    Input:
-        x: Tensor of shape (B, T, H, D), where
-            - B: batch size
-            - T: sequence length
-            - H: number of heads
-            - D: head dimension (must be even)
-
-    Output:
-        Tensor: Same shape (B, T, H, D)
-
-    Example:
-        >>> rope = RoPE(head_dim=64, seq_len=512)
-        >>> x = torch.randn(4, 32, 8, 64)  # B=4, T=32, H=8, D=64
-        >>> out = rope(x)  # (4, 32, 8, 64)
-    """
-    def __init__(self, head_dim, seq_len, theta=10000.0, device='cpu', dtype=torch.float32):
+    def __init__(self, head_dim: int, seq_len: int, theta: float = 10000.0, device="cpu", dtype=torch.float32):
         super().__init__()
-        self.dtype = dtype
+        self.head_dim = head_dim
+        self.seq_len = seq_len
+        self.theta = theta
         self.device = device
-        assert head_dim % 2 == 0, "head_dim must be even"
+        self.dtype = dtype
 
-        theta_numerator = torch.arange(0, head_dim, 2, device=device)
-        inv_freq = 1.0 / (theta ** (theta_numerator / head_dim))  # (D/2)
+        # Precompute and register buffer
+        freq_complex = self._precompute_theta_position_frequency(head_dim, seq_len, theta)
+        self.register_buffer("freq_complex", freq_complex, persistent=True)
 
-        m = torch.arange(seq_len, device=device)  # (T)
-        freqs = torch.outer(m, inv_freq)  # (T, D/2)
-        self.register_buffer("freq_complex", torch.polar(torch.ones_like(freqs), freqs))  # (T, D/2)
+    def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, theta: float):
+        assert head_dim % 2 == 0, "head_dim must be even for RoPE"
+        dim_half = head_dim // 2
+        inv_freq = 1.0 / (theta ** (torch.arange(0, dim_half, device=self.device) / dim_half))
+        pos = torch.arange(seq_len, device=self.device)
+        freqs = torch.outer(pos, inv_freq)  # (seq_len, dim_half)
+        freq_complex = torch.polar(torch.ones_like(freqs), freqs)
+        return freq_complex  # (seq_len, dim_half)
 
-    def forward(self, x):
-        batch_size, seq_len, num_head, embed_dim = x.shape
-        assert embed_dim % 2 == 0, "embed_dim must be even"
+    def forward(self, x: torch.Tensor):
+        B, H, T, D = x.shape
+        assert D % 2 == 0, "head_dim must be even for RoPE"
 
-        x_reshaped = x.view(batch_size, seq_len, num_head, embed_dim // 2, 2)
-        x_complex = torch.view_as_complex(x_reshaped).to(device=x.device)  # (B, T, H, D/2)
+        # reshape to complex
+        x = x.view(B, H, T, D // 2, 2)
+        x_complex = torch.view_as_complex(x)  # (B, H, T, D//2)
 
-        freqs = self.freq_complex[:seq_len].unsqueeze(0).unsqueeze(2).to(device=x.device)  # (1, T, 1, D/2)
-        x_rotated = x_complex * freqs  # Element-wise complex multiplication
+        # slice correct freqs
+        freqs = self.freq_complex[:T].unsqueeze(0).unsqueeze(0)  # (1,1,T,D//2)
 
-        x_out = torch.view_as_real(x_rotated).contiguous().view(batch_size, seq_len, num_head, embed_dim)
-        return x_out.to(device=self.device, dtype=self.dtype)
+        # apply rotation
+        x_rot = x_complex * freqs  # (B, H, T, D//2)
+
+        # back to real
+        x_out = torch.view_as_real(x_rot).view(B, H, T, D)
+        return x_out.to(dtype=self.dtype, device=x.device)

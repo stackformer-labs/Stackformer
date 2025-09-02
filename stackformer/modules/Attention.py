@@ -2,7 +2,6 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .position_embedding import RoPE
 
 class Self_Attention(nn.Module):
     def __init__(self, embed_dim, dropout=0.1, device='cpu', dtype=torch.float32):
@@ -100,7 +99,7 @@ class Multi_Head_Attention(nn.Module):
             self._causal_mask_cache[seq_len] = mask
         return self._causal_mask_cache[seq_len]
 
-    def forward(self, x, mask=True, rope=False):
+    def forward(self, x, mask=True):
         B, T, C = x.shape
         x = x.to(device=self.device, dtype=self.dtype)
 
@@ -113,12 +112,6 @@ class Multi_Head_Attention(nn.Module):
         q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
         k = k.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
-        
-        # Applay RoPE for Q and K
-        if rope:
-            Rope = RoPE(head_dim=self.head_dim, seq_len=T, device=self.device, dtype=self.dtype)
-            q = Rope(q)
-            k = Rope(k)
         
         # Compute scaled dot-product attention scores
         att = (q @ k.transpose(-2, -1)) * self.scale  # Shape: (B, num_heads, T, T)
@@ -247,7 +240,7 @@ class Multi_query_Attention(nn.Module):
             self._causal_mask_cache[seq_len] = mask
         return self._causal_mask_cache[seq_len]
 
-    def forward(self, x, mask=True, rope=False):
+    def forward(self, x, mask=True):
         B, T, C = x.shape
         x = x.to(device=self.device, dtype=self.q_proj.weight.dtype)
 
@@ -264,11 +257,6 @@ class Multi_query_Attention(nn.Module):
         # Then broadcast to (B, num_heads, T, head_dim)
         k = k.unsqueeze(1).expand(B, self.num_heads, T, self.head_dim)
         v = v.unsqueeze(1).expand(B, self.num_heads, T, self.head_dim)
-
-        if rope:
-            Rope = RoPE(head_dim=self.head_dim, seq_len=q.shape[1], device=self.device, dtype=self.dtype)
-            q = Rope(q)
-            k = Rope(k)
             
         # Scaled dot-product attention
         att = (q @ k.transpose(-2, -1)) * self.scale  # (B, num_heads, T, T)
@@ -321,7 +309,7 @@ class Group_query_Attention(nn.Module):
             self._causal_mask_cache[seq_len] = mask
         return self._causal_mask_cache[seq_len]
 
-    def forward(self, x, mask=True, rope=False):
+    def forward(self, x, mask=True):
         B, T, C = x.shape
         x = x.to(device=self.device, dtype=self.q_proj.weight.dtype)
 
@@ -334,12 +322,6 @@ class Group_query_Attention(nn.Module):
         q = q.view(B, T, self.num_query_heads, self.head_dim).transpose(1, 2)  # (B, num_query_heads, T, head_dim)
         k = k.view(B, T, self.num_kv_heads, self.head_dim).transpose(1, 2)     # (B, num_kv_heads, T, head_dim)
         v = v.view(B, T, self.num_kv_heads, self.head_dim).transpose(1, 2)
-        
-        # Applay Rope for Q and K
-        if rope:
-            Rope = RoPE(head_dim=self.head_dim,seq_len=T)
-            q = Rope(q)
-            k = Rope(k)
 
         # Repeat keys and values for each query head group
         k = k.repeat_interleave(self.num_queries_per_kv, dim=1)  # (B, num_query_heads, T, head_dim)
@@ -360,109 +342,6 @@ class Group_query_Attention(nn.Module):
 
         return self.out_proj(out)
     
-class Linear_Attention(nn.Module):
-    def __init__(self, embed_dim, num_heads, dropout, eps=1e-5, device='cpu', dtype=torch.float32):
-        super().__init__()
-        assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
-        
-        self.embed_dim = embed_dim
-        self.num_heads = num_heads
-        self.head_dim = embed_dim // num_heads
-        self.eps = eps
-        self.device = device
-        self.dtype = dtype
-
-        # Linear projections for Q, K, V
-        self.query = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
-        self.key = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
-        self.value = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
-
-        # Final output projection
-        self.out_proj = nn.Linear(embed_dim, embed_dim, device=device, dtype=dtype)
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, x):
-        B, T, _ = x.shape
-
-        # Compute Q, K, V and reshape for multi-head attention
-        Q = self.query(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)  # (B, H, T, D)
-        K = self.key(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)    # (B, H, T, D)
-        V = self.value(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)  # (B, H, T, D)
-
-        # Feature map: phi(x) = ELU(x) + 1 (positive kernel trick)
-        phi_q = F.elu(Q) + 1.0
-        phi_k = F.elu(K) + 1.0
-
-        # Cumulative KV (outer product and cumulative sum)
-        kv_outer = torch.matmul(phi_k.unsqueeze(-1), V.unsqueeze(-2))  # (B, H, T, D, D)
-        s = torch.cumsum(kv_outer, dim=2)                              # (B, H, T, D, D)
-        z = torch.cumsum(phi_k, dim=2)                                 # (B, H, T, D)
-
-        # Compute attention output
-        numerator = torch.matmul(phi_q.unsqueeze(-2), s).squeeze(-2)   # (B, H, T, D)
-        denominator = torch.sum(phi_q * z, dim=-1, keepdim=True) + self.eps  # (B, H, T, 1)
-        out = numerator / denominator                                  # (B, H, T, D)
-
-        # Reshape and project output
-        out = out.transpose(1, 2).contiguous().view(B, T, self.embed_dim)
-        return self.dropout(self.out_proj(out))
-    
-class Multi_latent_Attention(nn.Module):
-    def __init__(self, embed_dim, q_compressed_dim, kv_compressed_dim, num_heads,
-                device='cpu', dtype=torch.float32, dropout=0.0):
-        super().__init__()
-        assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
-        
-        self.embed_dim = embed_dim
-        self.q_compressed_dim = q_compressed_dim
-        self.kv_compressed_dim = kv_compressed_dim
-        self.num_heads = num_heads
-        self.head_dim = embed_dim // num_heads
-
-        # Query compression path
-        self.W_dq = nn.Linear(embed_dim, q_compressed_dim, bias=False, device=device, dtype=dtype)
-        self.W_dq_norm = nn.LayerNorm(q_compressed_dim, device=device, dtype=dtype)
-        self.W_uq = nn.Linear(q_compressed_dim, embed_dim, bias=False, device=device, dtype=dtype)
-
-        # Key/Value compression path
-        self.W_dkv = nn.Linear(embed_dim, kv_compressed_dim, bias=False, device=device, dtype=dtype)
-        self.W_dkv_norm = nn.LayerNorm(kv_compressed_dim, device=device, dtype=dtype)
-        self.W_uk = nn.Linear(kv_compressed_dim, embed_dim, device=device, dtype=dtype)
-        self.W_uv = nn.Linear(kv_compressed_dim, embed_dim, device=device, dtype=dtype)
-
-        self.out_proj = nn.Linear(embed_dim, embed_dim, device=device, dtype=dtype)
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, x):
-        B, T, _ = x.shape
-
-        # Compress and reconstruct queries
-        q_latent = self.W_dq_norm(self.W_dq(x))        # (B, T, q_compressed_dim)
-        q_final = self.W_uq(q_latent)                  # (B, T, embed_dim)
-
-        # Compress and reconstruct keys/values
-        kv_latent = self.W_dkv_norm(self.W_dkv(x))     # (B, T, kv_compressed_dim)
-        k_final = self.W_uk(kv_latent)                 # (B, T, embed_dim)
-        v_final = self.W_uv(kv_latent)                 # (B, T, embed_dim)
-
-        # Reshape for multi-head attention
-        Q = q_final.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)  # (B, H, T, D)
-        K = k_final.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)  # (B, H, T, D)
-        V = v_final.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)  # (B, H, T, D)
-
-        # Scaled Dot-Product Attention (causal)
-        out = F.scaled_dot_product_attention(
-            Q, K, V,
-            attn_mask=None,
-            is_causal=True,
-            dropout_p=self.dropout.p
-        )  # (B, H, T, D)
-
-        # Combine heads and project
-        out = out.transpose(1, 2).contiguous().view(B, T, self.embed_dim)  # (B, T, embed_dim)
-        out = self.dropout(self.out_proj(out))                             # Final projection
-        return out
-
 class Local_Attention(nn.Module):
     def __init__(self, embed_dim, num_heads, window_size, dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
@@ -501,7 +380,7 @@ class Local_Attention(nn.Module):
             self._causal_mask_cache[seq_len] = ~band_mask  # invert: True where disallowed
         return self._causal_mask_cache[seq_len]
 
-    def forward(self, x, mask=True, rope=False):
+    def forward(self, x, mask=True):
         B, T, C = x.shape
         x = x.to(device=self.device, dtype=self.q_proj.weight.dtype)
 
@@ -514,12 +393,6 @@ class Local_Attention(nn.Module):
         q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)  # (B, H, T, D)
         k = k.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
-        
-        # Applay RoPE for Q and K
-        if rope:
-            Rope = RoPE(head_dim=self.head_dim, seq_len=T, device=self.device, dtype=self.dtype)
-            q = Rope(q)
-            k = Rope(k)
         
         # Scaled dot-product
         att = (q @ k.transpose(-2, -1)) * self.scale  # (B, H, T, T)
