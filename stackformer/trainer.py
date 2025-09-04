@@ -390,10 +390,10 @@ class Trainer:
             'accumulated_steps': accumulated_steps,
             'global_step': global_step,
             'batch_idx_to_resume': batch_idx_to_resume,
-            'rng_state': {
-                'torch': torch.get_rng_state(),
-                'cuda': torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
-            }
+            # 'rng_state': {
+            #     'torch': torch.get_rng_state(),
+            #     'cuda': torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+            # }
         }
         os.makedirs(output_dir, exist_ok=True)
         path = f'{output_dir}/checkpoint_{name}.pt'
@@ -441,9 +441,9 @@ class Trainer:
         accumulated_steps = checkpoint['accumulated_steps']
         batch_idx_to_resume = checkpoint['batch_idx_to_resume']
         # Restore RNG states
-        torch.set_rng_state(checkpoint['rng_state']['torch'])
-        if torch.cuda.is_available() and checkpoint['rng_state']['cuda']:
-            torch.cuda.set_rng_state_all(checkpoint['rng_state']['cuda'])
+        # torch.set_rng_state(checkpoint['rng_state']['torch'])
+        # if torch.cuda.is_available() and checkpoint['rng_state']['cuda']:
+        #     torch.cuda.set_rng_state_all(checkpoint['rng_state']['cuda'])
         return {
             'current_epoch': current_epoch,
             'num_epoch': num_epoch,
@@ -560,11 +560,11 @@ class Trainer:
         
         # Print training information
         print(f"🧠 Number of parameters: {sum(p.numel() for p in self.model.parameters()):,}")
-        print(f"🍱 Number of train samples: {len(self.train_dataset):,}")
-        print(f"📊 Number of eval samples: {len(self.eval_dataset):,}")
-        print(f"📦 Train steps per epoch (batches): {len(train_loader):,}")
-        print(f"📦 Eval steps per epoch (batches): {len(eval_loader):,}")
-        print("---"*15)
+        print(f"🏋️ Number of train samples: {len(self.train_dataset):,}")
+        print(f"🧪 Number of eval samples: {len(self.eval_dataset):,}")
+        print(f"🏃 Train steps per epoch (batches): {len(train_loader):,}")
+        print(f"🧭 Eval steps per epoch (batches): {len(eval_loader):,}")
+        print("\n","---"*15,'\n')
         
         # Main training loop
         for epoch in range(start_epoch, num_epoch):
@@ -657,7 +657,7 @@ class Trainer:
             # Epoch-based evaluation
             if (self.eval_per_epoch is not None and (epoch+1) % self.eval_per_epoch == 0) or is_last_epoch:
                 avg_eval_loss = self.eval_model(model, eval_loader, self.max_eval_step)
-                print(f"🎯 Eval loss: {avg_eval_loss:.4f}")
+                print(f"❄️ Eval loss: {avg_eval_loss:.4f}")
             
             # Check for max epoch termination
             if is_last_epoch:
