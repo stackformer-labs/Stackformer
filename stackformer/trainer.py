@@ -290,7 +290,7 @@ class Trainer:
         
         # Initialize training state
         global_step = 0
-        start_epoch = 0
+        start_epoch = 1
         num_epoch = self.num_epoch
         batch_idx_to_resume = 0
         accumulated_steps = 0
@@ -314,13 +314,13 @@ class Trainer:
         print("\n","---"*15,'\n')
         
         # Main training loop
-        for epoch in range(start_epoch, num_epoch):
+        for epoch in range(start_epoch, num_epoch+1):
             model.train()
             epoch_loss = 0
             current_loss = 0
             
             # Create progress bar for the epoch
-            pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epoch}")
+            pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{num_epoch}")
             
             for batch_idx, batch in enumerate(pbar):
                 # Handle resuming from specific batch
@@ -377,10 +377,10 @@ class Trainer:
                 if is_last_step:
                     self.save_model(
                         model=model, optimizer=optimizer, scheduler=scheduler,
-                        epoch=epoch+1, num_epoch=num_epoch, loss=epoch_loss,
+                        epoch=epoch, num_epoch=num_epoch, loss=epoch_loss,
                         global_step=global_step, output_dir=self.output_dir,
                         batch_idx_to_resume=batch_idx+1,accumulated_steps=accumulated_steps, 
-                        name=f'final_step_epoch_{epoch+1}_step_{global_step}'
+                        name=f'final_step_epoch_{epoch}_step_{global_step}'
                     )
                     return
                 
@@ -390,10 +390,10 @@ class Trainer:
                     global_step % self.Save_step == 0):
                     self.save_model(
                         model=model, optimizer=optimizer, scheduler=scheduler,
-                        epoch=epoch+1, num_epoch=num_epoch, loss=epoch_loss,
+                        epoch=epoch, num_epoch=num_epoch, loss=epoch_loss,
                         global_step=global_step, output_dir=self.output_dir,
                         batch_idx_to_resume=batch_idx+1,accumulated_steps=accumulated_steps,
-                        name=f'epoch_{epoch+1}_step_{global_step}'
+                        name=f'epoch_{epoch}_step_{global_step}'
                     )
             
             # Close the progress bar to ensure clean output
@@ -408,10 +408,10 @@ class Trainer:
                 optimizer.zero_grad()
                 global_step += 1
             
-            is_last_epoch = (self.max_epoch is not None and (epoch+1) == self.max_epoch)
+            is_last_epoch = (self.max_epoch is not None and (epoch) == self.max_epoch)
             
             # Epoch-based evaluation
-            if (self.eval_per_epoch is not None and (epoch+1) % self.eval_per_epoch == 0) or is_last_epoch:
+            if (self.eval_per_epoch is not None and (epoch) % self.eval_per_epoch == 0) or is_last_epoch:
                 avg_eval_loss = self.eval_model(model, eval_loader, self.max_eval_step)
                 print(f"❄️ Eval loss: {avg_eval_loss:.4f}")
             
@@ -419,10 +419,10 @@ class Trainer:
             if is_last_epoch:
                 self.save_model(
                     model=model, optimizer=optimizer, scheduler=scheduler,
-                    epoch=epoch+1, num_epoch=num_epoch, loss=epoch_loss,
+                    epoch=epoch, num_epoch=num_epoch, loss=epoch_loss,
                     global_step=global_step, output_dir=self.output_dir,
                     batch_idx_to_resume=batch_idx+1,accumulated_steps=accumulated_steps,
-                    name=f'final_model_epoch_{epoch+1}_step_{global_step}'
+                    name=f'final_model_epoch_{epoch}_step_{global_step}'
                 )
                 return
             
@@ -435,8 +435,8 @@ class Trainer:
                 (epoch + 1) % self.Save_epoch == 0):
                 self.save_model(
                     model=model, optimizer=optimizer, scheduler=scheduler,
-                    epoch=epoch+1, num_epoch=num_epoch, loss=epoch_loss,
+                    epoch=epoch, num_epoch=num_epoch, loss=epoch_loss,
                     global_step=global_step, output_dir=self.output_dir,
                     batch_idx_to_resume=batch_idx+1,accumulated_steps=accumulated_steps,
-                    name=f'epoch_{epoch+1}_step_{global_step}'
+                    name=f'epoch_{epoch}_step_{global_step}'
                 )
