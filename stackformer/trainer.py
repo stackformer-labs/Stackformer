@@ -303,8 +303,13 @@ class Trainer:
             num_epoch = ckpt_data['num_epoch']
             batch_idx_to_resume = ckpt_data['batch_idx_to_resume']
             accumulated_steps = ckpt_data['accumulated_steps']
-            print(f"♻️ Resuming training from epoch {start_epoch}, step {global_step}")
-        
+            
+            # Adjust start_epoch if batch_idx_to_resume is 0
+            if batch_idx_to_resume == 0:
+                start_epoch += 1 
+                
+            print(f"♻️ Resuming training from epoch {start_epoch}, step {global_step}, batch {batch_idx_to_resume}")
+
         # Print training information
         print(f"🧠 Number of parameters: {sum(p.numel() for p in self.model.parameters()):,}")
         print(f"🏋️ Number of train samples: {len(self.train_dataset):,}")
@@ -312,23 +317,30 @@ class Trainer:
         print(f"🏃 Train steps per epoch (batches): {len(train_loader):,}")
         print(f"🧭 Eval steps per epoch (batches): {len(eval_loader):,}")
         print("\n","---"*15,'\n')
-        
+
         # Main training loop
-        for epoch in range(start_epoch, num_epoch+1):
+        for epoch in range(start_epoch, num_epoch + 1):
             model.train()
             epoch_loss = 0
             current_loss = 0
-            
+
             # Create progress bar for the epoch
             pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{num_epoch}")
-            
-            for batch_idx, batch in enumerate(pbar):
-                # Handle resuming from specific batch
-                if epoch == start_epoch and self.resume_training:
-                    if batch_idx < batch_idx_to_resume:
-                        continue
-                    elif batch_idx == batch_idx_to_resume:
-                        batch_idx_to_resume = 0
+
+            if epoch == start_epoch and self.resume_training and batch_idx_to_resume > 0:
+                print(f"⚡ Fast-resuming: skipping {batch_idx_to_resume} batches...")
+                train_iter = iter(pbar)
+                # advance the progress bar while skipping
+                for _ in range(batch_idx_to_resume):
+                    next(train_iter, None)
+                    pbar.update(1)
+            else:
+                train_iter = iter(pbar)
+                
+            # Now continue training normally, pbar already advanced to the resume point
+            for batch_idx, batch in enumerate(train_iter, start=batch_idx_to_resume):
+                if epoch == start_epoch and self.resume_training and batch_idx == batch_idx_to_resume:
+                    batch_idx_to_resume = 0   # reset after resuming
                 
                 # Load batch data
                 inputs, targets = batch
