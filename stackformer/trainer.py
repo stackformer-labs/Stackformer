@@ -17,21 +17,6 @@ class Trainer:
     - Automatic checkpointing and resuming
     - Built-in evaluation during training
     - Flexible saving strategies
-    
-    Example:
-        Basic usage:
-        >>> trainer = Trainer(
-        ...     model=my_model,
-        ...     train_dataset=train_data,
-        ...     eval_dataset=eval_data,
-        ...     train_batch_size=16,
-        ...     eval_batch_size=32,
-        ...     vocab_size=50000,
-        ...     output_dir="./checkpoints",
-        ...     num_epoch=3,
-        ...     lr=1e-4
-        ... )
-        >>> trainer.train()
     """
     
     def __init__(self,
@@ -95,40 +80,6 @@ class Trainer:
             resume_training (bool): Whether to resume training (default: False)
             seed (int): Random seed for reproducibility (default: 42)
             device (str): Device to train on ("cpu", "cuda", "mps")
-            
-        Example:
-            >>> # Basic setup
-            >>> trainer = Trainer(
-            ...     model=model,
-            ...     train_dataset=train_data,
-            ...     eval_dataset=eval_data,
-            ...     train_batch_size=16,
-            ...     eval_batch_size=32,
-            ...     vocab_size=50000,
-            ...     output_dir="./outputs",
-            ...     num_epoch=5,
-            ...     lr=2e-4,
-            ...     scheduler_type="cosine",
-            ...     device="cuda"
-            ... )
-            
-            >>> # Advanced setup with gradient accumulation
-            >>> trainer = Trainer(
-            ...     model=large_model,
-            ...     train_dataset=train_data,
-            ...     eval_dataset=eval_data,
-            ...     train_batch_size=4,  # Small batch due to memory
-            ...     eval_batch_size=8,
-            ...     vocab_size=50000,
-            ...     output_dir="./checkpoints",
-            ...     num_epoch=10,
-            ...     lr=1e-4,
-            ...     grad_accumulation_step=8,  # Effective batch size = 4*8 = 32
-            ...     scheduler_type="linear",
-            ...     warmup_steps=1000,
-            ...     Save_epoch=2,
-            ...     eval_per_epoch=1
-            ... )
         """
         self.model = model
         self.train_dataset = train_dataset
@@ -159,13 +110,6 @@ class Trainer:
     def set_seed(self, seed):
         """
         Set random seed for reproducible training.
-        
-        Args:
-            seed (int): Random seed value
-            
-        Note:
-            Sets seeds for PyTorch CPU and CUDA operations to ensure
-            reproducible results across training runs.
         """
         torch.manual_seed(seed)
         if self.device == 'cuda' and torch.cuda.is_available(): 
@@ -174,28 +118,6 @@ class Trainer:
     def get_scheduler(self, scheduler_type, total_training_steps, optimizer):
         """
         Create and return a learning rate scheduler.
-        
-        Args:
-            scheduler_type (str): Type of scheduler to create
-            total_training_steps (int): Total number of training steps
-            optimizer: PyTorch optimizer instance
-            
-        Returns:
-            PyTorch scheduler or None if scheduler_type is None
-            
-        Raises:
-            ValueError: If scheduler_type is not supported
-            
-        Supported schedulers:
-            - "linear": Linear decay with warmup
-            - "cosine": Cosine annealing with warmup  
-            - "cosine_restarts": Cosine with hard restarts
-            - "cosineannealing": Standard cosine annealing
-            - "cosine_warm_restarts": Cosine annealing with warm restarts
-            
-        Example:
-            >>> optimizer = AdamW(model.parameters(), lr=1e-4)
-            >>> scheduler = trainer.get_scheduler("cosine", 10000, optimizer)
         """
         if scheduler_type is None:
             return None
@@ -228,21 +150,6 @@ class Trainer:
     def get_optimizer(self, optimizer_type, model, lr, weight_decay):
         """
         Create and return an optimizer.
-        
-        Args:
-            optimizer_type (str): Type of optimizer ("adamw" or "sgd")
-            model: PyTorch model
-            lr (float): Learning rate
-            weight_decay (float): Weight decay for regularization
-            
-        Returns:
-            PyTorch optimizer instance
-            
-        Raises:
-            ValueError: If optimizer_type is not supported
-            
-        Example:
-            >>> optimizer = trainer.get_optimizer("adamw", model, 1e-4, 0.01)
         """
         if optimizer_type.lower() == "adamw":
             return AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -254,38 +161,28 @@ class Trainer:
     def eval_model(self, model, eval_loader, max_val_steps):
         """
         Evaluate the model on validation data.
-        
-        Args:
-            model: PyTorch model to evaluate
-            eval_loader: DataLoader for evaluation data
-            max_val_steps (int, optional): Maximum evaluation steps
-            
-        Returns:
-            float: Average evaluation loss
-            
-        Note:
-            - Switches model to eval mode during evaluation
-            - Uses cross-entropy loss with ignore_index=-100
-            - Restores model to train mode after evaluation
-            
-        Example:
-            >>> eval_loss = trainer.eval_model(model, eval_loader, 100)
-            >>> print(f"Validation loss: {eval_loss:.4f}")
         """
         eval_loss = 0
         model.eval()
         max_val_steps = min(max_val_steps or len(eval_loader), len(eval_loader))
+
         with torch.no_grad():
             pbar = tqdm(eval_loader, total=max_val_steps, desc="Evaluating", leave=False)
             for step, (inputs, targets) in enumerate(pbar):
                 inputs = inputs.to(self.device)
                 targets = targets.to(self.device)
-                output = model(inputs)  # shape: [B, T, V]
+                output = model(inputs)  # [B, T, V]
                 loss = torch.nn.functional.cross_entropy(
                     output.view(-1, output.size(-1)),
-                    targets.view(-1), ignore_index=-100)
-                pbar.set_postfix(loss=loss.item())
+                    targets.view(-1),
+                    ignore_index=-100
+                )
                 eval_loss += loss.item()
+                
+                # Update progress bar with current evaluation loss
+                current_avg_loss = eval_loss / (step + 1)
+                pbar.set_postfix(loss=f"{current_avg_loss:.4f}")
+                
                 if step + 1 >= max_val_steps:
                     break
         model.train()
@@ -295,19 +192,6 @@ class Trainer:
     def get_train_loader(self, train_dataset, batch_size, seed):
         """
         Create a DataLoader for training data.
-        
-        Args:
-            train_dataset: PyTorch Dataset
-            batch_size (int): Batch size
-            seed (int): Random seed for shuffling
-            
-        Returns:
-            DataLoader: Configured training data loader
-            
-        Features:
-            - Shuffles data for better training
-            - Uses pin_memory for CUDA acceleration
-            - Deterministic shuffling with seed
         """
         generator = torch.Generator()
         generator.manual_seed(seed)
@@ -323,18 +207,6 @@ class Trainer:
     def get_eval_loader(self, eval_dataset, batch_size, seed):
         """
         Create a DataLoader for evaluation data.
-        
-        Args:
-            eval_dataset: PyTorch Dataset
-            batch_size (int): Batch size
-            seed (int): Random seed
-            
-        Returns:
-            DataLoader: Configured evaluation data loader
-            
-        Features:
-            - No shuffling for consistent evaluation
-            - Uses pin_memory for CUDA acceleration
         """
         generator = torch.Generator()
         generator.manual_seed(seed)
@@ -351,34 +223,6 @@ class Trainer:
                 accumulated_steps, batch_idx_to_resume, output_dir, name):
         """
         Save a complete training checkpoint.
-        
-        Args:
-            model: PyTorch model
-            optimizer: Optimizer instance
-            scheduler: Scheduler instance (can be None)
-            epoch (int): Current epoch
-            num_epoch (int): Total epochs
-            loss (float): Current loss
-            global_step (int): Global training step
-            accumulated_steps (int): Current accumulated steps
-            batch_idx_to_resume (int): Batch index for resuming
-            output_dir (str): Directory to save checkpoint
-            name (str): Checkpoint name
-            
-        Saves:
-            - Model state dict
-            - Optimizer state dict
-            - Scheduler state dict (if exists)
-            - Training metadata
-            - Random number generator states for reproducibility
-            
-        Example:
-            >>> trainer.save_model(
-            ...     model, optimizer, scheduler, epoch=5, num_epoch=10,
-            ...     loss=2.5, global_step=1000, accumulated_steps=0,
-            ...     batch_idx_to_resume=0, output_dir="./checkpoints",
-            ...     name="epoch_5_checkpoint"
-            ... )
         """
         checkpoint = {
             'model_state_dict': model.state_dict(),
@@ -390,10 +234,6 @@ class Trainer:
             'accumulated_steps': accumulated_steps,
             'global_step': global_step,
             'batch_idx_to_resume': batch_idx_to_resume,
-            # 'rng_state': {
-            #     'torch': torch.get_rng_state(),
-            #     'cuda': torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
-            # }
         }
         os.makedirs(output_dir, exist_ok=True)
         path = f'{output_dir}/checkpoint_{name}.pt'
@@ -403,31 +243,6 @@ class Trainer:
     def load_checkpoint(self, path, model, optimizer, scheduler):
         """
         Load a training checkpoint and restore training state.
-        
-        Args:
-            path (str): Path to checkpoint file
-            model: PyTorch model
-            optimizer: Optimizer instance
-            scheduler: Scheduler instance (can be None)
-            
-        Returns:
-            dict: Dictionary containing restored training state with keys:
-                - current_epoch: Epoch to resume from
-                - num_epoch: Total epochs
-                - accumulated_steps: Accumulated gradient steps
-                - batch_idx_to_resume: Batch index to resume from
-                - global_step: Global training step
-                - loss: Last recorded loss
-                
-        Note:
-            Restores random number generator states for reproducible resuming
-            
-        Example:
-            >>> state = trainer.load_checkpoint(
-            ...     "./checkpoints/checkpoint_epoch_5.pt", 
-            ...     model, optimizer, scheduler
-            ... )
-            >>> print(f"Resuming from epoch {state['current_epoch']}")
         """
         checkpoint = torch.load(path, map_location=self.device)
         model.load_state_dict(checkpoint['model_state_dict'])
@@ -440,10 +255,6 @@ class Trainer:
         num_epoch = checkpoint['num_epoch']
         accumulated_steps = checkpoint['accumulated_steps']
         batch_idx_to_resume = checkpoint['batch_idx_to_resume']
-        # Restore RNG states
-        # torch.set_rng_state(checkpoint['rng_state']['torch'])
-        # if torch.cuda.is_available() and checkpoint['rng_state']['cuda']:
-        #     torch.cuda.set_rng_state_all(checkpoint['rng_state']['cuda'])
         return {
             'current_epoch': current_epoch,
             'num_epoch': num_epoch,
@@ -456,70 +267,6 @@ class Trainer:
     def train(self):
         """
         Main training loop that handles the complete training process.
-        
-        This method orchestrates the entire training pipeline including:
-        - Data loading and preprocessing
-        - Model initialization and optimization setup
-        - Training loop with gradient accumulation
-        - Evaluation and checkpointing
-        - Learning rate scheduling
-        - Progress tracking and logging
-        
-        Training Process:
-            1. Sets random seed for reproducibility
-            2. Creates data loaders for training and evaluation
-            3. Calculates total training steps
-            4. Initializes model, optimizer, and scheduler
-            5. Handles checkpoint resuming if specified
-            6. Runs training epochs with:
-                - Forward and backward passes
-                - Gradient accumulation
-                - Gradient clipping
-                - Learning rate scheduling
-                - Periodic evaluation
-                - Checkpoint saving
-            7. Saves final model
-            
-        Features:
-            - Gradient accumulation for large effective batch sizes
-            - Gradient clipping for training stability
-            - Flexible evaluation scheduling
-            - Multiple checkpoint saving strategies
-            - Comprehensive progress tracking
-            - Memory-efficient data loading
-            
-        Example:
-            >>> # Basic training
-            >>> trainer = Trainer(...)
-            >>> trainer.train()  # Starts training automatically
-            
-            >>> # Training with custom parameters
-            >>> trainer = Trainer(
-            ...     model=model,
-            ...     train_dataset=train_data,
-            ...     eval_dataset=eval_data,
-            ...     train_batch_size=16,
-            ...     eval_batch_size=32,
-            ...     vocab_size=50000,
-            ...     output_dir="./checkpoints",
-            ...     num_epoch=10,
-            ...     lr=2e-4,
-            ...     scheduler_type="cosine",
-            ...     grad_accumulation_step=4,  # Effective batch size = 64
-            ...     eval_per_epoch=2,          # Evaluate every 2 epochs
-            ...     Save_epoch=5,              # Save every 5 epochs
-            ...     warmup_steps=1000,
-            ...     device="cuda"
-            ... )
-            >>> trainer.train()
-            
-        Output:
-            Prints training progress including:
-            - Model parameter count
-            - Dataset sizes
-            - Epoch progress with loss
-            - Evaluation results
-            - Checkpoint saving confirmations
         """
         # Set random seed for reproducibility
         self.set_seed(self.seed)
@@ -570,7 +317,10 @@ class Trainer:
         for epoch in range(start_epoch, num_epoch):
             model.train()
             epoch_loss = 0
-            pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epoch}", leave=False)
+            current_loss = 0
+            
+            # Create progress bar for the epoch
+            pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epoch}")
             
             for batch_idx, batch in enumerate(pbar):
                 # Handle resuming from specific batch
@@ -597,10 +347,13 @@ class Trainer:
                 loss = loss / self.grad_accumulation_step
                 loss.backward()
                 
-                # Update progress display
-                pbar.set_postfix(loss=loss.item() * self.grad_accumulation_step)
-                epoch_loss += loss.item() * self.grad_accumulation_step
+                # Store current loss for display
+                current_loss = loss.item() * self.grad_accumulation_step
+                epoch_loss += current_loss
                 accumulated_steps += 1
+                
+                # Update progress bar with current loss
+                pbar.set_postfix(loss=f"{current_loss:.4f}")
                 
                 # Gradient accumulation and optimization step
                 if accumulated_steps % self.grad_accumulation_step == 0:
@@ -642,6 +395,9 @@ class Trainer:
                         batch_idx_to_resume=batch_idx+1,accumulated_steps=accumulated_steps,
                         name=f'epoch_{epoch+1}_step_{global_step}'
                     )
+            
+            # Close the progress bar to ensure clean output
+            pbar.close()
 
             # Handle remaining accumulated gradients at epoch end
             if accumulated_steps > 0:
@@ -670,9 +426,9 @@ class Trainer:
                 )
                 return
             
-            # Print epoch summary
+            # Print final epoch loss
             avg_epoch_loss = epoch_loss / len(train_loader)
-            print(f"🔥 Epoch {epoch+1} finished - Training Loss: {avg_epoch_loss:.4f}")
+            print(f"🔥 Epoch loss: {avg_epoch_loss:.4f}")
             
             # Epoch-based checkpoint saving
             if (self.Save_epoch is not None and 
