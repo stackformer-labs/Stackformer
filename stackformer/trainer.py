@@ -1,6 +1,6 @@
 import torch
 import os
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader,Subset
 from torch.optim import AdamW, SGD
 from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR, CosineAnnealingWarmRestarts
 from transformers import get_linear_schedule_with_warmup, get_cosine_schedule_with_warmup, get_cosine_with_hard_restarts_schedule_with_warmup
@@ -306,7 +306,7 @@ class Trainer:
             
             # Adjust start_epoch if batch_idx_to_resume is 0
             if batch_idx_to_resume == 0:
-                start_epoch += 1 
+                start_epoch += 1
                 
             print(f"♻️ Resuming training from epoch {start_epoch}, step {global_step}, batch {batch_idx_to_resume}")
 
@@ -324,18 +324,37 @@ class Trainer:
             epoch_loss = 0
             current_loss = 0
 
-            # Create progress bar for the epoch
-            pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{num_epoch}")
+            # Total batches in original loader
+            original_num_batches = len(train_loader)
 
-            if epoch == start_epoch and self.resume_training and batch_idx_to_resume > 0:
-                print(f"⚡ Fast-resuming: skipping {batch_idx_to_resume} batches...")
-                train_iter = iter(pbar)
-                # advance the progress bar while skipping
-                for _ in range(batch_idx_to_resume):
-                    next(train_iter, None)
-                    pbar.update(1)
+            # Case 1: Resuming mid-epoch
+            if self.resume_training and batch_idx_to_resume > 0:
+                total_samples = len(train_loader.dataset)
+                start_sample = batch_idx_to_resume * train_loader.batch_size
+                subset_indices = list(range(start_sample, total_samples))
+                
+                resumed_dataset = Subset(train_loader.dataset, subset_indices)
+                
+                # Create new loader only for this run
+                train_loader = DataLoader(
+                    resumed_dataset,
+                    batch_size=train_loader.batch_size,
+                    shuffle=False,
+                    num_workers=train_loader.num_workers
+                )
+                
+                # Create one progress bar with full size
+                pbar = tqdm(train_loader, total=original_num_batches, desc=f"Epoch {epoch}/{num_epoch}")
+                
+                # Manually advance pbar to resume position
+                pbar.n = batch_idx_to_resume
+                pbar.last_print_n = batch_idx_to_resume
+                pbar.refresh()
+                train_iter = iter(train_loader)
+            # Case 2: Fresh epoch
             else:
-                train_iter = iter(pbar)
+                pbar = tqdm(train_loader, total=original_num_batches, desc=f"Epoch {epoch}/{num_epoch}")
+                train_iter = iter(train_loader)
                 
             # Now continue training normally, pbar already advanced to the resume point
             for batch_idx, batch in enumerate(train_iter, start=batch_idx_to_resume):
