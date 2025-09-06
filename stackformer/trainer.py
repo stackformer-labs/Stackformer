@@ -166,7 +166,7 @@ class Trainer:
         model.eval()
         max_val_steps = min(max_val_steps or len(eval_loader), len(eval_loader))
         with torch.no_grad():
-            for step, (inputs, targets) in tqdm(enumerate(eval_loader), total=max_val_steps):
+            for step, (inputs, targets) in tqdm(enumerate(eval_loader), desc="Evaluating", total=max_val_steps):
                 inputs = inputs.to(self.device, non_blocking=True)
                 targets = targets.to(self.device, non_blocking=True)
                 output = model(inputs)  # [B, T, V]
@@ -176,7 +176,7 @@ class Trainer:
                     ignore_index=-100
                 )
                 eval_loss += loss.item()
-                if step + 1 >= max_val_steps:
+                if step >= max_val_steps:
                     break
         model.train()
         avg_eval_loss = eval_loss / max_val_steps
