@@ -271,45 +271,67 @@ class Trainer:
         # Set random seed for reproducibility
         self.set_seed(self.seed)
         
-        # Create data loaders
-        train_loader = self.get_train_loader(self.train_dataset, self.train_batch_size, self.seed)
-        eval_loader = self.get_eval_loader(self.eval_dataset, self.eval_batch_size, self.seed)
-        
-        # Calculate total training steps
-        steps_per_epoch = len(train_loader) // self.grad_accumulation_step
-        total_training_steps = self.max_steps if self.max_steps is not None else steps_per_epoch * self.num_epoch
-        
         # Create output directory
         os.makedirs(self.output_dir, exist_ok=True)
         
-        # Initialize training components
+        # Initialize components
         model = self.model.to(self.device)
         optimizer = self.get_optimizer(self.optimizer_type, model, self.lr, self.weight_decay)
         criterion = torch.nn.functional.cross_entropy
-        scheduler = self.get_scheduler(self.scheduler_type, total_training_steps, optimizer)
-        
-        # Initialize training state
+        # scheduler will be built later, after total_training_steps is known
+
+        # Default training state
         global_step = 0
         start_epoch = 1
         num_epoch = self.num_epoch
         batch_idx_to_resume = 0
         accumulated_steps = 0
 
-        # Handle checkpoint resuming
+        # Handle checkpoint resume
         if self.resume_training and self.model_to_resume:
-            ckpt_data = self.load_checkpoint(self.model_to_resume, model, optimizer, scheduler)
+            # temporarily build a scheduler with dummy steps (will be replaced later)
+            scheduler_tmp = self.get_scheduler(self.scheduler_type, 1, optimizer)
+            ckpt_data = self.load_checkpoint(self.model_to_resume, model, optimizer, scheduler_tmp)
+
             start_epoch = ckpt_data['current_epoch']
             global_step = ckpt_data['global_step']
             num_epoch = ckpt_data['num_epoch']
             batch_idx_to_resume = ckpt_data['batch_idx_to_resume']
             accumulated_steps = ckpt_data['accumulated_steps']
-            
-            # Adjust start_epoch if batch_idx_to_resume is 0
+
             if batch_idx_to_resume == 0:
                 start_epoch += 1
                 
             print(f"♻️ Resuming training from epoch {start_epoch}, step {global_step}, batch {batch_idx_to_resume}")
 
+        # Create loaders
+        train_loader_full = self.get_train_loader(self.train_dataset, self.train_batch_size, self.seed)
+        eval_loader = self.get_eval_loader(self.eval_dataset, self.eval_batch_size, self.seed)
+        
+        original_num_batches = len(train_loader_full)
+        
+        if self.resume_training and batch_idx_to_resume > 0:
+            total_samples = len(train_loader_full.dataset)
+            start_sample = batch_idx_to_resume * train_loader_full.batch_size
+            subset_indices = range(start_sample, total_samples)
+            resumed_dataset = Subset(train_loader_full.dataset, subset_indices)
+            
+            train_loader = DataLoader(
+                resumed_dataset,
+                batch_size=train_loader_full.batch_size,
+                shuffle=False,
+                num_workers=train_loader_full.num_workers
+            )
+        else:
+            train_loader = train_loader_full
+        
+        # Training steps and scheduler (final)
+        original_num_batches = len(train_loader)
+        steps_per_epoch = len(train_loader) // self.grad_accumulation_step
+        total_training_steps = self.max_steps if self.max_steps is not None else steps_per_epoch * num_epoch
+        
+        scheduler = self.get_scheduler(self.scheduler_type, total_training_steps, optimizer)
+        
         # Print training information
         print(f"🧠 Number of parameters: {sum(p.numel() for p in self.model.parameters()):,}")
         print(f"🏋️ Number of train samples: {len(self.train_dataset):,}")
@@ -323,39 +345,11 @@ class Trainer:
             model.train()
             epoch_loss = 0
             current_loss = 0
-
-            # Total batches in original loader
-            original_num_batches = len(train_loader)
-
-            # Case 1: Resuming mid-epoch
-            if self.resume_training and batch_idx_to_resume > 0:
-                total_samples = len(train_loader.dataset)
-                start_sample = batch_idx_to_resume * train_loader.batch_size
-                subset_indices = list(range(start_sample, total_samples))
-                
-                resumed_dataset = Subset(train_loader.dataset, subset_indices)
-                
-                # Create new loader only for this run
-                train_loader = DataLoader(
-                    resumed_dataset,
-                    batch_size=train_loader.batch_size,
-                    shuffle=False,
-                    num_workers=train_loader.num_workers
-                )
-                
-                # Create one progress bar with full size
-                pbar = tqdm(train_loader, total=original_num_batches, desc=f"Epoch {epoch}/{num_epoch}")
-                
-                # Manually advance pbar to resume position
-                pbar.n = batch_idx_to_resume
-                pbar.last_print_n = batch_idx_to_resume
-                pbar.refresh()
-                train_iter = iter(train_loader)
-            # Case 2: Fresh epoch
-            else:
-                pbar = tqdm(train_loader, total=original_num_batches, desc=f"Epoch {epoch}/{num_epoch}")
-                train_iter = iter(train_loader)
-                
+            
+            # Initialize progress bar with resume position
+            pbar = tqdm(train_loader, total=original_num_batches, desc=f"Epoch {epoch}/{num_epoch}", initial=batch_idx_to_resume)
+            train_iter = iter(train_loader)
+            
             # Now continue training normally, pbar already advanced to the resume point
             for batch_idx, batch in enumerate(train_iter, start=batch_idx_to_resume):
                 if epoch == start_epoch and self.resume_training and batch_idx == batch_idx_to_resume:
@@ -429,7 +423,7 @@ class Trainer:
             
             # Close the progress bar to ensure clean output
             pbar.close()
-
+            
             # Handle remaining accumulated gradients at epoch end
             if accumulated_steps > 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
