@@ -348,10 +348,9 @@ class Trainer:
             
             # Initialize progress bar with resume position
             pbar = tqdm(train_loader, total=original_num_batches, desc=f"Epoch {epoch}/{num_epoch}", initial=batch_idx_to_resume)
-            train_iter = iter(train_loader)
             
             # Now continue training normally, pbar already advanced to the resume point
-            for batch_idx, batch in enumerate(train_iter, start=batch_idx_to_resume):
+            for batch_idx, batch in enumerate(pbar, start=batch_idx_to_resume):
                 if epoch == start_epoch and self.resume_training and batch_idx == batch_idx_to_resume:
                     batch_idx_to_resume = 0   # reset after resuming
                 
@@ -377,9 +376,6 @@ class Trainer:
                 epoch_loss += current_loss
                 accumulated_steps += 1
                 
-                # Update progress bar with current loss
-                pbar.set_postfix(loss=f"{current_loss:.4f}")
-                
                 # Gradient accumulation and optimization step
                 if accumulated_steps % self.grad_accumulation_step == 0:
                     # Gradient clipping for stable training
@@ -390,6 +386,12 @@ class Trainer:
                     optimizer.zero_grad()
                     global_step += 1
                     accumulated_steps = 0
+                
+                # Update progress bar with current loss anr lr
+                pbar.set_postfix(
+                    loss=f"{current_loss:.4f}",
+                    lr=f"{scheduler.get_last_lr()[0]:.2e}" if scheduler is not None else "n/a"
+                )
                 
                 is_last_step = (self.max_steps is not None and global_step >= self.max_steps)
                 
