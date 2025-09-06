@@ -307,35 +307,36 @@ class Trainer:
         # Create loaders
         train_loader_full = self.get_train_loader(self.train_dataset, self.train_batch_size, self.seed)
         eval_loader = self.get_eval_loader(self.eval_dataset, self.eval_batch_size, self.seed)
-        
+
+        # Keep the original number of batches for reporting & pbar
         original_num_batches = len(train_loader_full)
-        
+
         if self.resume_training and batch_idx_to_resume > 0:
             total_samples = len(train_loader_full.dataset)
             start_sample = batch_idx_to_resume * train_loader_full.batch_size
             subset_indices = range(start_sample, total_samples)
             resumed_dataset = Subset(train_loader_full.dataset, subset_indices)
-            
-            train_loader = DataLoader(
+
+            effective_train_loader = DataLoader(
                 resumed_dataset,
                 batch_size=train_loader_full.batch_size,
                 shuffle=False,
                 num_workers=train_loader_full.num_workers
             )
         else:
-            train_loader = train_loader_full
-        
-        # Training steps and scheduler (final)
-        steps_per_epoch = len(train_loader) // self.grad_accumulation_step
+            effective_train_loader = train_loader_full
+
+        # Training steps and scheduler (based on original full size)
+        steps_per_epoch = original_num_batches // self.grad_accumulation_step
         total_training_steps = self.max_steps if self.max_steps is not None else steps_per_epoch * num_epoch
-        
+
         scheduler = self.get_scheduler(self.scheduler_type, total_training_steps, optimizer)
-        
+
         # Print training information
         print(f"🧠 Number of parameters: {sum(p.numel() for p in self.model.parameters()):,}")
         print(f"🏋️ Number of train samples: {len(self.train_dataset):,}")
         print(f"🧪 Number of eval samples: {len(self.eval_dataset):,}")
-        print(f"🏃 Train steps per epoch (batches): {len(train_loader):,}")
+        print(f"🏃 Train steps per epoch (batches): {original_num_batches:,}")   # <-- fixed
         print(f"🧭 Eval steps per epoch (batches): {len(eval_loader):,}")
         print("\n","---"*15,'\n')
 
@@ -344,9 +345,9 @@ class Trainer:
             model.train()
             epoch_loss = 0
             current_loss = 0
-            
-            # Initialize progress bar with resume position
-            pbar = tqdm(train_loader, total=original_num_batches, desc=f"Epoch {epoch}/{num_epoch}", initial=batch_idx_to_resume)
+
+            # pbar uses full dataset count, starts at resume point
+            pbar = tqdm(effective_train_loader, total=original_num_batches, desc=f"Epoch {epoch}/{num_epoch}",initial=batch_idx_to_resume)
             
             # Now continue training normally, pbar already advanced to the resume point
             for batch_idx, batch in enumerate(pbar, start=batch_idx_to_resume):
