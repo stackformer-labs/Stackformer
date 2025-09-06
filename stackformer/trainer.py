@@ -160,17 +160,16 @@ class Trainer:
 
     def eval_model(self, model, eval_loader, max_val_steps):
         """
-        Evaluate the model on validation data.
+        Evaluate the model on validation data with a clean progress bar.
         """
         eval_loss = 0
         model.eval()
         max_val_steps = min(max_val_steps or len(eval_loader), len(eval_loader))
-
         with torch.no_grad():
             pbar = tqdm(eval_loader, total=max_val_steps, desc="Evaluating", leave=False)
             for step, (inputs, targets) in enumerate(pbar):
-                inputs = inputs.to(self.device)
-                targets = targets.to(self.device)
+                inputs = inputs.to(self.device, non_blocking=True)
+                targets = targets.to(self.device, non_blocking=True)
                 output = model(inputs)  # [B, T, V]
                 loss = torch.nn.functional.cross_entropy(
                     output.view(-1, output.size(-1)),
@@ -178,16 +177,13 @@ class Trainer:
                     ignore_index=-100
                 )
                 eval_loss += loss.item()
-                
-                # Update progress bar with current evaluation loss
-                current_avg_loss = eval_loss / (step + 1)
-                pbar.set_postfix(loss=f"{current_avg_loss:.4f}")
-                
                 if step + 1 >= max_val_steps:
                     break
+            pbar.close()
         model.train()
         avg_eval_loss = eval_loss / max_val_steps
         return avg_eval_loss
+
     
     def get_train_loader(self, train_dataset, batch_size, seed):
         """
