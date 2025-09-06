@@ -326,7 +326,6 @@ class Trainer:
             train_loader = train_loader_full
         
         # Training steps and scheduler (final)
-        original_num_batches = len(train_loader)
         steps_per_epoch = len(train_loader) // self.grad_accumulation_step
         total_training_steps = self.max_steps if self.max_steps is not None else steps_per_epoch * num_epoch
         
