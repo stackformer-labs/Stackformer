@@ -454,7 +454,7 @@ class Trainer:
                 return
             
             # Print final epoch loss
-            avg_epoch_loss = epoch_loss / len(train_loader)
+            avg_epoch_loss = epoch_loss / original_num_batches
             print(f"🔥 Epoch loss: {avg_epoch_loss:.4f}")
             
             # Epoch-based checkpoint saving
