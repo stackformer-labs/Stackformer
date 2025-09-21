@@ -6,9 +6,11 @@ from stackformer.modules.Feed_forward import FF_ReLU
 
 # Patch Embedding
 class PatchEmbedding(nn.Module):
-    def __init__(self, img_size=224, patch_size=16, emb_dim=768):
+    def __init__(self, img_size=224, patch_size=16, emb_dim=768, device='cpu', dtype=torch.float32):
         super().__init__()
         assert img_size % patch_size == 0, "Image size must be divisible by patch size"
+        self.device=device
+        self.dtype=dtype
         self.img_size = img_size
         self.patch_size = patch_size
         self.emb_dim = emb_dim
@@ -25,7 +27,7 @@ class PatchEmbedding(nn.Module):
         # x: [B, 3, H, W]
         x = self.proj(x)                 # [B, D, H/P, W/P]
         x = x.flatten(2).transpose(1, 2) # [B, N, D]
-        return x
+        return x.to(device=self.device, dtype=self.dtype)
 
 # Transformer Block
 class Block(nn.Module):
@@ -72,7 +74,7 @@ class ViT(nn.Module):
                 dropout=0.1, hidden_dim=3072, eps=1e-5,
                 device='cpu', dtype=torch.float32):
         super().__init__()
-        self.patch_embedding = PatchEmbedding(img_size, patch_size, Emb_dim)
+        self.patch_embedding = PatchEmbedding(img_size, patch_size, Emb_dim, device=device,dtype=dtype)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, Emb_dim, device=device, dtype=dtype))
         self.pos_embed = nn.Parameter(torch.zeros(1, 1 + self.patch_embedding.num_patches, Emb_dim, device=device, dtype=dtype))
         self.dropout = nn.Dropout(dropout)
@@ -84,7 +86,7 @@ class ViT(nn.Module):
         self.mlp_head = nn.Sequential(
             nn.LayerNorm(Emb_dim, eps=eps, device=device, dtype=dtype),
             nn.Linear(Emb_dim, num_classes, device=device, dtype=dtype)
-        )
+        ).to(device=device,dtype=dtype)
 
         # Init weights
         self.apply(self._init_weights)
