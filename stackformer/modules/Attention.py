@@ -134,6 +134,103 @@ class Multi_Head_Attention(nn.Module):
         # Final linear projection
         return self.out_proj(out)  # (B, T, C)
 
+class Multi_Head_Attention_With_RoPE(nn.Module):
+    def __init__(self, embed_dim, num_heads, dropout=0.1, device='cpu', dtype=torch.float32):
+        super().__init__()
+        assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
+
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads  # Each head gets a slice of the embedding
+        self.scale = 1.0 / math.sqrt(self.head_dim)
+        self.device = device
+        self.dtype = dtype
+
+        # Linear layer
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
+        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
+        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
+        
+        # Final output projection after attention
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
+        
+        self.dropout = nn.Dropout(dropout)
+
+        # Cache for causal masks keyed by sequence length
+        self._causal_mask_cache = {}
+
+    def _get_or_create_causal_mask(self, seq_len):
+        if seq_len not in self._causal_mask_cache:
+            mask = torch.triu(
+                torch.ones(seq_len, seq_len, dtype=torch.bool, device=self.device),
+                diagonal=1
+            )
+            self._causal_mask_cache[seq_len] = mask
+        return self._causal_mask_cache[seq_len]
+    
+    def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, theta: float = 10000.0):
+        assert head_dim % 2 == 0, "head_dim must be even for RoPE"
+
+        dim_half = head_dim // 2
+        inv_freq = 1.0 / (theta ** (torch.arange(0, dim_half, device=self.device) / dim_half))
+        pos = torch.arange(seq_len, device=self.device)
+        freqs = torch.outer(pos, inv_freq)  # (seq_len, dim_half)
+
+        freq_complex = torch.polar(torch.ones_like(freqs), freqs)
+        return freq_complex  # (seq_len, dim_half)
+
+    def _apply_rotary_position_embedding(self, x: torch.Tensor, freq_complex: torch.Tensor):
+        B, H, T, D = x.shape
+        assert D % 2 == 0, "head_dim must be even for RoPE"
+
+        x = x.view(B, H, T, D // 2, 2)
+        x_complex = torch.view_as_complex(x)  # (B, H, T, D//2)
+
+        freq = freq_complex[:T].unsqueeze(0).unsqueeze(0)  # (1, 1, T, D//2)
+        x_rot = x_complex * freq  # rotate via complex mult
+
+        x_out = torch.view_as_real(x_rot).view(B, H, T, D)
+        return x_out.to(dtype=self.dtype, device=self.device)
+    
+    def forward(self, x, mask=True):
+        B, T, C = x.shape
+        x = x.to(device=self.device, dtype=self.dtype)
+
+        q = self.q_proj(x)  # (B, T, C)
+        k = self.k_proj(x) 
+        v = self.v_proj(x) 
+        
+        # Reshape for multi-head attention:
+        # (B, T, C) → (B, T, num_heads, head_dim) → (B, num_heads, T, head_dim)
+        q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        k = k.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        v = v.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        
+        freq = self._precompute_theta_position_frequency(self.head_dim, T)
+        q = self._apply_rotary_position_embedding(q, freq)
+        k = self._apply_rotary_position_embedding(k, freq)
+        
+        # Compute scaled dot-product attention scores
+        att = (q @ k.transpose(-2, -1)) * self.scale  # Shape: (B, num_heads, T, T)
+
+        # Apply causal mask if needed
+        if mask:
+            causal_mask = self._get_or_create_causal_mask(T)  # (T, T)
+            att.masked_fill_(causal_mask[None, None, :, :], float('-inf'))
+
+        # Normalize scores and apply dropout
+        att = F.softmax(att, dim=-1)
+        att = self.dropout(att)
+
+        # Compute attention output
+        out = att @ v  # (B, num_heads, T, head_dim)
+
+        # Concatenate all heads: (B, T, num_heads * head_dim)
+        out = out.transpose(1, 2).contiguous().view(B, T, C)
+
+        # Final linear projection
+        return self.out_proj(out)  # (B, T, C)
+
 class Cross_MultiHead_Attention(nn.Module):
     def __init__(self, embed_dim, num_heads, dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
@@ -249,7 +346,6 @@ class Multi_query_Attention(nn.Module):
         k = self.k_proj(x)  # (B, T, C)
         v = self.v_proj(x)  # (B, T, C)
         
-            
         # Reshape queries to multi-head: (B, T, C) -> (B, num_heads, T, head_dim)
         q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
 
@@ -257,7 +353,7 @@ class Multi_query_Attention(nn.Module):
         # Then broadcast to (B, num_heads, T, head_dim)
         k = k.unsqueeze(1).expand(B, self.num_heads, T, self.head_dim)
         v = v.unsqueeze(1).expand(B, self.num_heads, T, self.head_dim)
-            
+        
         # Scaled dot-product attention
         att = (q @ k.transpose(-2, -1)) * self.scale  # (B, num_heads, T, T)
 
@@ -277,6 +373,104 @@ class Multi_query_Attention(nn.Module):
 
         return self.out_proj(out)  # Final linear projection
     
+class Multi_query_Attention_With_RoPE(nn.Module):
+    def __init__(self, embed_dim, num_heads, dropout=0.1, device='cpu', dtype=torch.float32):
+        super().__init__()
+        assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
+
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        self.scale = 1.0 / math.sqrt(self.head_dim)
+        self.device = device
+        self.dtype = dtype
+
+        # Projection layers
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
+        self.k_proj = nn.Linear(embed_dim, self.head_dim, bias=False, device=device, dtype=self.dtype)
+        self.v_proj = nn.Linear(embed_dim, self.head_dim, bias=False, device=device, dtype=self.dtype)
+        
+        # Output final projection
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
+
+        self.dropout = nn.Dropout(dropout)
+
+        # Cache for causal masks (for autoregressive models)
+        self._causal_mask_cache = {}
+
+    def _get_or_create_causal_mask(self, seq_len):
+        if seq_len not in self._causal_mask_cache:
+            mask = torch.triu(
+                torch.ones(seq_len, seq_len, dtype=torch.bool, device=self.device),
+                diagonal=1
+            )
+            self._causal_mask_cache[seq_len] = mask
+        return self._causal_mask_cache[seq_len]
+    
+    def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, theta: float = 10000.0):
+        assert head_dim % 2 == 0, "head_dim must be even for RoPE"
+
+        dim_half = head_dim // 2
+        inv_freq = 1.0 / (theta ** (torch.arange(0, dim_half, device=self.device) / dim_half))
+        pos = torch.arange(seq_len, device=self.device)
+        freqs = torch.outer(pos, inv_freq)  # (seq_len, dim_half)
+
+        freq_complex = torch.polar(torch.ones_like(freqs), freqs)
+        return freq_complex  # (seq_len, dim_half)
+
+    def _apply_rotary_position_embedding(self, x: torch.Tensor, freq_complex: torch.Tensor):
+        B, H, T, D = x.shape
+        assert D % 2 == 0, "head_dim must be even for RoPE"
+
+        x = x.view(B, H, T, D // 2, 2)
+        x_complex = torch.view_as_complex(x)  # (B, H, T, D//2)
+
+        freq = freq_complex[:T].unsqueeze(0).unsqueeze(0)  # (1, 1, T, D//2)
+        x_rot = x_complex * freq  # rotate via complex mult
+
+        x_out = torch.view_as_real(x_rot).view(B, H, T, D)
+        return x_out.to(dtype=self.dtype, device=self.device)
+    
+    def forward(self, x, mask=True):
+        B, T, C = x.shape
+        x = x.to(device=self.device, dtype=self.q_proj.weight.dtype)
+
+        # Project input to queries (multi-head) and shared keys/values (single head)
+        q = self.q_proj(x)  # (B, T, C)
+        k = self.k_proj(x)  # (B, T, C)
+        v = self.v_proj(x)  # (B, T, C)
+        
+        # Reshape queries to multi-head: (B, T, C) -> (B, num_heads, T, head_dim)
+        q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+
+        # Expand shared k/v across heads: (B, T, head_dim) -> (B, 1, T, head_dim)
+        # Then broadcast to (B, num_heads, T, head_dim)
+        k = k.unsqueeze(1).expand(B, self.num_heads, T, self.head_dim)
+        v = v.unsqueeze(1).expand(B, self.num_heads, T, self.head_dim)
+        
+        freq = self._precompute_theta_position_frequency(self.head_dim, T)
+        q = self._apply_rotary_position_embedding(q, freq)
+        k = self._apply_rotary_position_embedding(k, freq)
+        
+        # Scaled dot-product attention
+        att = (q @ k.transpose(-2, -1)) * self.scale  # (B, num_heads, T, T)
+
+        # Apply causal mask if requested
+        if mask:
+            causal_mask = self._get_or_create_causal_mask(T)  # (T, T)
+            att = att.masked_fill(causal_mask[None, None, :, :], float('-inf'))
+
+        att = F.softmax(att, dim=-1)
+        att = self.dropout(att)
+
+        # Attention output
+        out = att @ v  # (B, num_heads, T, head_dim)
+
+        # Merge heads back: (B, num_heads, T, head_dim) -> (B, T, C)
+        out = out.transpose(1, 2).contiguous().view(B, T, C)
+
+        return self.out_proj(out)  # Final linear projection
+
 class Group_query_Attention(nn.Module):
     def __init__(self, embed_dim, num_query_heads, num_kv_heads, dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
@@ -342,6 +536,99 @@ class Group_query_Attention(nn.Module):
 
         return self.out_proj(out)
     
+class Group_query_Attention_With_RoPE(nn.Module):
+    def __init__(self, embed_dim, num_query_heads, num_kv_heads, dropout=0.1, device='cpu', dtype=torch.float32):
+        super().__init__()
+        assert embed_dim % num_query_heads == 0, "embed_dim must be divisible by num_query_heads"
+        assert num_query_heads % num_kv_heads == 0, "num_query_heads must be divisible by num_kv_heads"
+
+        self.embed_dim = embed_dim
+        self.num_query_heads = num_query_heads
+        self.num_kv_heads = num_kv_heads
+        self.head_dim = embed_dim // num_query_heads
+        self.num_queries_per_kv = num_query_heads // num_kv_heads
+        self.scale = 1.0 / math.sqrt(self.head_dim)
+        self.device = device
+
+        # Projection layers
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
+        self.k_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim, bias=False, device=device, dtype=dtype)
+        self.v_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim, bias=False, device=device, dtype=dtype)
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
+
+        self.dropout = nn.Dropout(dropout)
+        self._causal_mask_cache = {}
+
+    def _get_or_create_causal_mask(self, seq_len):
+        if seq_len not in self._causal_mask_cache:
+            mask = torch.triu(
+                torch.ones(seq_len, seq_len, dtype=torch.bool, device=self.device),
+                diagonal=1
+            )
+            self._causal_mask_cache[seq_len] = mask
+        return self._causal_mask_cache[seq_len]
+    
+    def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, theta: float = 10000.0):
+        assert head_dim % 2 == 0, "head_dim must be even for RoPE"
+
+        dim_half = head_dim // 2
+        inv_freq = 1.0 / (theta ** (torch.arange(0, dim_half, device=self.device) / dim_half))
+        pos = torch.arange(seq_len, device=self.device)
+        freqs = torch.outer(pos, inv_freq)  # (seq_len, dim_half)
+
+        freq_complex = torch.polar(torch.ones_like(freqs), freqs)
+        return freq_complex  # (seq_len, dim_half)
+
+    def _apply_rotary_position_embedding(self, x: torch.Tensor, freq_complex: torch.Tensor):
+        B, H, T, D = x.shape
+        assert D % 2 == 0, "head_dim must be even for RoPE"
+
+        x = x.view(B, H, T, D // 2, 2)
+        x_complex = torch.view_as_complex(x)  # (B, H, T, D//2)
+
+        freq = freq_complex[:T].unsqueeze(0).unsqueeze(0)  # (1, 1, T, D//2)
+        x_rot = x_complex * freq  # rotate via complex mult
+
+        x_out = torch.view_as_real(x_rot).view(B, H, T, D)
+        return x_out.to(dtype=self.dtype, device=self.device)
+    
+    def forward(self, x, mask=True):
+        B, T, C = x.shape
+        x = x.to(device=self.device, dtype=self.q_proj.weight.dtype)
+
+        # Project Q, K, V
+        q = self.q_proj(x)  # (B, T, C)
+        k = self.k_proj(x) 
+        v = self.v_proj(x) 
+
+        # Reshape projections
+        q = q.view(B, T, self.num_query_heads, self.head_dim).transpose(1, 2)  # (B, num_query_heads, T, head_dim)
+        k = k.view(B, T, self.num_kv_heads, self.head_dim).transpose(1, 2)     # (B, num_kv_heads, T, head_dim)
+        v = v.view(B, T, self.num_kv_heads, self.head_dim).transpose(1, 2)
+
+        # Repeat keys and values for each query head group
+        k = k.repeat_interleave(self.num_queries_per_kv, dim=1)  # (B, num_query_heads, T, head_dim)
+        v = v.repeat_interleave(self.num_queries_per_kv, dim=1)
+        
+        freq = self._precompute_theta_position_frequency(self.head_dim, T)
+        q = self._apply_rotary_position_embedding(q, freq)
+        k = self._apply_rotary_position_embedding(k, freq)
+        
+        # Attention
+        att = (q @ k.transpose(-2, -1)) * self.scale  # (B, num_query_heads, T, T)
+
+        if mask:
+            causal_mask = self._get_or_create_causal_mask(T)
+            att = att.masked_fill(causal_mask[None, None, :, :], float('-inf'))
+
+        att = F.softmax(att, dim=-1)
+        att = self.dropout(att)
+
+        out = att @ v  # (B, num_query_heads, T, head_dim)
+        out = out.transpose(1, 2).contiguous().view(B, T, C)
+
+        return self.out_proj(out)
+
 class Local_Attention(nn.Module):
     def __init__(self, embed_dim, num_heads, window_size, dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()

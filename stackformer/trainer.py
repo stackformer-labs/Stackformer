@@ -1,10 +1,11 @@
 import torch
 import os
-from torch.utils.data import DataLoader,Subset
+from torch.utils.data import Dataset,DataLoader,Subset
 from torch.optim import AdamW, SGD
 from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR, CosineAnnealingWarmRestarts
 from transformers import get_linear_schedule_with_warmup, get_cosine_schedule_with_warmup, get_cosine_with_hard_restarts_schedule_with_warmup
 from tqdm import tqdm
+from typing import Literal
 
 class Trainer:
     """
@@ -21,16 +22,17 @@ class Trainer:
     
     def __init__(self,
                 model,
-                train_dataset,
-                eval_dataset,
-                train_batch_size,
-                eval_batch_size,
-                vocab_size,
-                output_dir,
-                num_epoch,
+                train_dataset: Dataset,
+                eval_dataset: Dataset,
+                train_batch_size: int,
+                eval_batch_size: int,
+                vocab_size: int,
+                output_dir: str,
+                num_epoch: int,
                 lr: float,
-                scheduler_type=None, 
-                optimizer_type="adamw",
+                trainer_type: Literal["transformer","normal"] = "transformer",
+                scheduler_type: Literal["linear","cosine","cosine_restarts","cosineannealing","cosine_warm_restarts"] = None,
+                optimizer_type: Literal["adamw","sgd"] = "adamw",
                 eval_per_epoch = 1,
                 eval_per_step = None,
                 weight_decay=0.01, 
@@ -94,6 +96,7 @@ class Trainer:
         self.eval_per_step = eval_per_step
         self.max_eval_step = max_eval_step
         self.lr = lr
+        self.trainer_type = trainer_type
         self.scheduler_type = scheduler_type
         self.output_dir = output_dir
         self.model_to_resume = model_to_resume
@@ -357,11 +360,16 @@ class Trainer:
                 output = model(inputs)
                 
                 # Calculate loss
-                loss = criterion(
-                    output.view(-1, self.vocab_size), 
-                    targets.view(-1), 
-                    ignore_index=-100
-                )
+                if self.trainer_type == 'transformer':
+                    loss = criterion(
+                        output.view(-1, self.vocab_size), 
+                        targets.view(-1), 
+                        ignore_index=-100
+                    )
+                elif self.trainer_type == 'normal':
+                    loss = criterion(output, targets)
+                
+                # Backward pass
                 loss = loss / self.grad_accumulation_step
                 loss.backward()
                 

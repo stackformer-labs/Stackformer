@@ -9,9 +9,12 @@ from .modules.position_embedding import RoPE
 # --- Attention mechanisms ---
 from .modules.Attention import Self_Attention
 from .modules.Attention import Multi_Head_Attention
+from .modules.Attention import Multi_Head_Attention_With_RoPE
 from .modules.Attention import Cross_MultiHead_Attention
 from .modules.Attention import Multi_query_Attention
+from .modules.Attention import Multi_query_Attention_With_RoPE
 from .modules.Attention import Group_query_Attention
+from .modules.Attention import Group_query_Attention_With_RoPE
 from .modules.Attention import Local_Attention
 from .modules.Attention import kv_cache_multihead
 from .modules.Attention import kv_cache_group_query
@@ -34,7 +37,12 @@ from .models.OpenAI import GPT_1
 from .models.OpenAI import GPT_2
 from .models.Meta import llama_1
 from .models.Meta import llama_2
+from .models.Google import gemma_1_2b
+from .models.Google import gemma_1_7b
 from .models.Transformer import transformer
+
+# --- Vision models ---
+from .vision_models.vit import ViT
 
 # --- Trainer ---
 from .trainer import Trainer
