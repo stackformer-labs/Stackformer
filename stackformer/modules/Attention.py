@@ -477,6 +477,8 @@ class Group_query_Attention(nn.Module):
         assert embed_dim % num_query_heads == 0, "embed_dim must be divisible by num_query_heads"
         assert num_query_heads % num_kv_heads == 0, "num_query_heads must be divisible by num_kv_heads"
 
+        self.dtype = dtype
+        self.device = device
         self.embed_dim = embed_dim
         self.num_query_heads = num_query_heads
         self.num_kv_heads = num_kv_heads
@@ -542,6 +544,8 @@ class Group_query_Attention_With_RoPE(nn.Module):
         assert embed_dim % num_query_heads == 0, "embed_dim must be divisible by num_query_heads"
         assert num_query_heads % num_kv_heads == 0, "num_query_heads must be divisible by num_kv_heads"
 
+        self.dtype = dtype
+        self.device = device
         self.embed_dim = embed_dim
         self.num_query_heads = num_query_heads
         self.num_kv_heads = num_kv_heads

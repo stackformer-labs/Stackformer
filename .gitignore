@@ -4,3 +4,4 @@ stackformer/modules/mask.py
 stackformer/__pycache__/
 stackformer/modules/__pycache__/
 stackformer/models/__pycache__/
+stackformer/vision_models/__pycache__/

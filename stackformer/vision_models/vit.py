@@ -6,11 +6,9 @@ from stackformer.modules.Feed_forward import FF_ReLU
 
 # Patch Embedding
 class PatchEmbedding(nn.Module):
-    def __init__(self, img_size=224, patch_size=16, emb_dim=768, device='cpu', dtype=torch.float32):
+    def __init__(self, img_size=224, patch_size=16, emb_dim=768):
         super().__init__()
         assert img_size % patch_size == 0, "Image size must be divisible by patch size"
-        self.device=device
-        self.dtype=dtype
         self.img_size = img_size
         self.patch_size = patch_size
         self.emb_dim = emb_dim
@@ -27,16 +25,17 @@ class PatchEmbedding(nn.Module):
         # x: [B, 3, H, W]
         x = self.proj(x)                 # [B, D, H/P, W/P]
         x = x.flatten(2).transpose(1, 2) # [B, N, D]
-        return x.to(device=self.device, dtype=self.dtype)
+        return x
 
 # Transformer Block
 class Block(nn.Module):
-    def __init__(self, Emb_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
+    def __init__(self, Emb_dim, num_heads, dropout, hidden_dim, eps=1e-5, device=None, dtype=torch.float32):
         super().__init__()
+        # Don't pass device to submodules - let them be moved with .to() later
         self.attention = Multi_Head_Attention(Emb_dim, num_heads, dropout, device=device, dtype=dtype)
-        self.norm1 = nn.LayerNorm(Emb_dim, eps=eps, device=device, dtype=dtype)
+        self.norm1 = nn.LayerNorm(Emb_dim, eps=eps, dtype=dtype)
         self.ff_relu = FF_ReLU(Emb_dim, hidden_dim, dropout, device=device, dtype=dtype)
-        self.norm2 = nn.LayerNorm(Emb_dim, eps=eps, device=device, dtype=dtype)
+        self.norm2 = nn.LayerNorm(Emb_dim, eps=eps, dtype=dtype)
 
     def forward(self, x):
         # Pre-norm attention
@@ -55,7 +54,7 @@ class Block(nn.Module):
 
 # Encoder (stack of blocks)
 class Encoder(nn.Module):
-    def __init__(self, num_layers, Emb_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
+    def __init__(self, num_layers, Emb_dim, num_heads, dropout, hidden_dim, eps=1e-5, device=None, dtype=torch.float32):
         super().__init__()
         self.layers = nn.ModuleList([
             Block(Emb_dim, num_heads, dropout, hidden_dim, eps, device=device, dtype=dtype)
@@ -70,23 +69,23 @@ class Encoder(nn.Module):
 # Vision Transformer (ViT)
 class ViT(nn.Module):
     def __init__(self, img_size=224, patch_size=16, num_layers=12,
-                Emb_dim=768, num_classes=1000, num_heads=12,
-                dropout=0.1, hidden_dim=3072, eps=1e-5,
-                device='cpu', dtype=torch.float32):
+                 Emb_dim=768, num_classes=1000, num_heads=12,
+                 dropout=0.1, hidden_dim=3072, eps=1e-5):
         super().__init__()
-        self.patch_embedding = PatchEmbedding(img_size, patch_size, Emb_dim, device=device,dtype=dtype)
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, Emb_dim, device=device, dtype=dtype))
-        self.pos_embed = nn.Parameter(torch.zeros(1, 1 + self.patch_embedding.num_patches, Emb_dim, device=device, dtype=dtype))
+        self.patch_embedding = PatchEmbedding(img_size, patch_size, Emb_dim)
+
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, Emb_dim))
+        self.pos_embed = nn.Parameter(torch.zeros(1, 1 + self.patch_embedding.num_patches, Emb_dim))
         self.dropout = nn.Dropout(dropout)
 
-        # Encoder
-        self.encoder = Encoder(num_layers, Emb_dim, num_heads, dropout, hidden_dim, eps, device, dtype)
+        # Encoder - don't pass device here, let .to() handle it
+        self.encoder = Encoder(num_layers, Emb_dim, num_heads, dropout, hidden_dim, eps)
 
         # Classification head
         self.mlp_head = nn.Sequential(
-            nn.LayerNorm(Emb_dim, eps=eps, device=device, dtype=dtype),
-            nn.Linear(Emb_dim, num_classes, device=device, dtype=dtype)
-        ).to(device=device,dtype=dtype)
+            nn.LayerNorm(Emb_dim, eps=eps),
+            nn.Linear(Emb_dim, num_classes)
+        )
 
         # Init weights
         self.apply(self._init_weights)
@@ -107,16 +106,15 @@ class ViT(nn.Module):
             nn.init.zeros_(m.bias)
 
     def forward(self, x):
-        # Patch + CLS + Positional embedding
+        B = x.size(0)
         x = self.patch_embedding(x)   # [B, N, D]
-        B = x.shape[0]
-        cls_tokens = self.cls_token.expand(B, -1, -1)   # [B, 1, D]
-        x = torch.cat((cls_tokens, x), dim=1)           # [B, 1+N, D]
-        x = x + self.pos_embed
+
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        pos_embed = self.pos_embed
+
+        x = torch.cat((cls_tokens, x), dim=1)   # [B, 1+N, D]
+        x = x + pos_embed
         x = self.dropout(x)
 
-        # Encoder
         x = self.encoder(x)
-
-        # Classification head
         return self.mlp_head(x[:, 0])   # [B, num_classes]
