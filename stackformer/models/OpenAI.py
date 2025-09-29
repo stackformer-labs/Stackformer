@@ -16,11 +16,11 @@ position: absolute
 FF: GeLU
 Norm: post normalization (layer norm)
 '''
-# --- GPT_1 Encoder Block ---
+# --- GPT_1 Decoder Block ---
 class GPT_1_Block(nn.Module):
-    def __init__(self, embed_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
+    def __init__(self, embed_dim, num_heads, dropout, hidden_dim, qkv_bias=True,eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
-        self.attention = Multi_Head_Attention(embed_dim, num_heads, dropout, device=device, dtype=dtype)
+        self.attention = Multi_Head_Attention(embed_dim, num_heads, dropout, qkv_bias=qkv_bias,device=device, dtype=dtype)
         self.norm1 = LayerNormalization(embed_dim, eps=eps, device=device,dtype=dtype)
         self.FF_GELU = FF_GELU(embed_dim, hidden_dim, dropout, device=device, dtype=dtype)
         self.norm2 = LayerNormalization(embed_dim, eps=eps, device=device,dtype=dtype)
@@ -38,12 +38,12 @@ class GPT_1_Block(nn.Module):
         
         return x
 
-# --- GPT_1 Encoder ---
-class GPT_1_Encoder(nn.Module):
-    def __init__(self, num_layers, embed_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
+# --- GPT_1 Decoder ---
+class GPT_1_Decoder(nn.Module):
+    def __init__(self, num_layers, embed_dim, num_heads, dropout, hidden_dim, qkv_bias=True, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
         self.layers = nn.ModuleList([
-            GPT_1_Block(embed_dim, num_heads, dropout, hidden_dim, eps, device=device, dtype=dtype)
+            GPT_1_Block(embed_dim, num_heads, dropout, hidden_dim, eps, qkv_bias=qkv_bias, device=device, dtype=dtype)
             for _ in range(num_layers)
         ])
         
@@ -54,7 +54,7 @@ class GPT_1_Encoder(nn.Module):
 
 class GPT_1(nn.Module):
     def __init__(self, vocab_size, num_layers, embed_dim, num_heads, seq_len,
-            dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
+            dropout, hidden_dim, qkv_bias=True, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
         self.device = device
         self.dtype = dtype
@@ -66,9 +66,9 @@ class GPT_1(nn.Module):
         # --- absolute position embedding ---
         self.position_embedding = AbsolutePositionEmbedding(embed_dim=embed_dim, seq_len=seq_len, device=device,dtype=dtype)
         
-        # --- Encoder ---
-        self.encoder = GPT_1_Encoder(num_layers=num_layers,embed_dim=embed_dim,num_heads=num_heads,dropout=dropout,
-            hidden_dim=hidden_dim,eps=eps,device=self.device,dtype=self.dtype)
+        # --- Decoder ---
+        self.decoder = GPT_1_Decoder(num_layers=num_layers,embed_dim=embed_dim,num_heads=num_heads,dropout=dropout,
+            hidden_dim=hidden_dim,qkv_bias=qkv_bias,eps=eps,device=self.device,dtype=self.dtype)
         
         # --- Final norm        
         self.final_norm = LayerNormalization(embed_dim, eps=eps, device=device,dtype=dtype)
@@ -81,7 +81,7 @@ class GPT_1(nn.Module):
         emb = self.embedding(x)  # (batch_size, seq_len, embed_dim)
         pos = self.position_embedding(x)  # (batch_size, seq_len, embed_dim)
         x = emb + pos
-        x = self.encoder(x)
+        x = self.decoder(x)
         x = self.final_norm(x)
         x = self.lm_head(x)
         return x
@@ -98,11 +98,11 @@ position: absolute
 FF: GeLU
 Norm: pre normalization (layer norm)
 '''
-# --- Encoder Block ---
+# --- Decoder Block ---
 class GPT_2_Block(nn.Module):
-    def __init__(self, embed_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
+    def __init__(self, embed_dim, num_heads, dropout, hidden_dim, qkv_bias=True, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
-        self.attention = Multi_Head_Attention(embed_dim, num_heads, dropout, device=device, dtype=dtype)
+        self.attention = Multi_Head_Attention(embed_dim, num_heads, dropout, qkv_bias=qkv_bias,device=device, dtype=dtype)
         self.norm1 = LayerNormalization(embed_dim, eps=eps, device=device,dtype=dtype)
         self.FF_GELU = FF_GELU(embed_dim, hidden_dim, dropout, device=device, dtype=dtype)
         self.norm2 = LayerNormalization(embed_dim, eps=eps, device=device,dtype=dtype)
@@ -120,12 +120,12 @@ class GPT_2_Block(nn.Module):
         
         return x
 
-# --- Encoder ---
-class GPT_2_Encoder(nn.Module):
-    def __init__(self, num_layers, embed_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
+# --- Decoder ---
+class GPT_2_Decoder(nn.Module):
+    def __init__(self, num_layers, embed_dim, num_heads, dropout, hidden_dim, qkv_bias=True, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
         self.layers = nn.ModuleList([
-            GPT_2_Block(embed_dim, num_heads, dropout, hidden_dim, eps, device=device, dtype=dtype)
+            GPT_2_Block(embed_dim, num_heads, dropout, hidden_dim, eps, qkv_bias=qkv_bias, device=device, dtype=dtype)
             for _ in range(num_layers)
         ])
         
@@ -136,7 +136,7 @@ class GPT_2_Encoder(nn.Module):
 
 class GPT_2(nn.Module):
     def __init__(self, vocab_size, num_layers, embed_dim, num_heads, seq_len,
-            dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
+            dropout, hidden_dim, qkv_bias=True, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
         self.device = device
         self.dtype = dtype
@@ -148,9 +148,9 @@ class GPT_2(nn.Module):
         # --- Adaptive position embedding ---
         self.position_embedding = AbsolutePositionEmbedding(embed_dim=embed_dim, seq_len=seq_len, device=device,dtype=dtype)
         
-        # --- Encoder ---
-        self.encoder = GPT_2_Encoder(num_layers=num_layers,embed_dim=embed_dim,num_heads=num_heads,dropout=dropout,
-            hidden_dim=hidden_dim,eps=eps,device=self.device,dtype=self.dtype)
+        # --- Decoder ---
+        self.decoder = GPT_2_Decoder(num_layers=num_layers,embed_dim=embed_dim,num_heads=num_heads,dropout=dropout,
+            hidden_dim=hidden_dim,eps=eps, qkv_bias=qkv_bias,device=self.device,dtype=self.dtype)
         
         # --- Final norm        
         self.final_norm = LayerNormalization(embed_dim, eps=eps, device=device,dtype=dtype)
@@ -164,7 +164,7 @@ class GPT_2(nn.Module):
         emb = self.embedding(x)  # (batch_size, seq_len, embed_dim)
         pos = self.position_embedding(x)  # (batch_size, seq_len, embed_dim)
         x = emb + pos
-        x = self.encoder(x)
+        x = self.decoder(x)
         x = self.final_norm(x)
         x = self.lm_head(x)
         return x

@@ -36,8 +36,8 @@ class llama_1_Block(nn.Module):
         
         return x
 
-# --- Encoder ---
-class llama_1_Encoder(nn.Module):
+# --- Decoder ---
+class llama_1_Decoder(nn.Module):
     def __init__(self, num_layers, embed_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
         self.layers = nn.ModuleList([
@@ -61,8 +61,8 @@ class llama_1(nn.Module):
         # --- Token embedding ---
         self.embedding = nn.Embedding(vocab_size, embed_dim, dtype=self.dtype, device=self.device)
         
-        # --- Encoder ---
-        self.encoder = llama_1_Encoder(num_layers=num_layers,embed_dim=embed_dim,num_heads=num_heads,dropout=dropout,
+        # --- Decoder ---
+        self.decoder = llama_1_Decoder(num_layers=num_layers,embed_dim=embed_dim,num_heads=num_heads,dropout=dropout,
                                     hidden_dim=hidden_dim,eps=eps,device=self.device,dtype=self.dtype)
         
         # --- Final norm        
@@ -74,7 +74,7 @@ class llama_1(nn.Module):
     def forward(self, x):
         # x shape: (batch_size, seq_len)
         emb = self.embedding(x)  # (batch_size, seq_len, embed_dim)
-        x = self.encoder(emb)
+        x = self.decoder(emb)
         x = self.final_norm(x)
         x = self.lm_head(x)
         return x
@@ -113,7 +113,7 @@ class llama_2_Block(nn.Module):
         x = x + residual
         return x
 
-class llama_2_Encoder(nn.Module):
+class llama_2_Decoder(nn.Module):
     def __init__(self, num_layers, embed_dim, num_query_heads, num_kv_heads, batch_size, kv_seq_len,
                 hidden_dim, eps=1e-5, dropout=0.1, dtype=torch.float32, device='cpu'):
         super().__init__()
@@ -140,7 +140,7 @@ class llama_2(nn.Module):
 
         self.embedding = nn.Embedding(vocab_size, embed_dim, dtype=dtype, device=device)
 
-        self.llama_2_Encoder = llama_2_Encoder(num_layers=num_layers, embed_dim=embed_dim, num_query_heads=num_query_heads,
+        self.llama_2_Decoder = llama_2_Decoder(num_layers=num_layers, embed_dim=embed_dim, num_query_heads=num_query_heads,
                             num_kv_heads=num_kv_heads, batch_size=batch_size, kv_seq_len=kv_seq_len,
                             hidden_dim=hidden_dim, eps=eps, dropout=dropout, dtype=dtype, device=device)
 
@@ -149,7 +149,7 @@ class llama_2(nn.Module):
 
     def forward(self, input_ids, start_pos=0):
         x = self.embedding(input_ids)
-        x = self.llama_2_Encoder(x, start_pos)
+        x = self.llama_2_Decoder(x, start_pos)
         x = self.final_norm(x)
         logits = self.lm_head(x)
         return logits

@@ -36,8 +36,8 @@ class gemma_1_2b_block(nn.Module):
         
         return x
 
-# --- Encoder ---
-class gemma_1_2b_Encoder(nn.Module):
+# --- Decoder ---
+class gemma_1_2b_Decoder(nn.Module):
     def __init__(self, num_layers, embed_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
         self.layers = nn.ModuleList([
@@ -61,8 +61,8 @@ class gemma_1_2b(nn.Module):
         # --- Token embedding ---
         self.embedding = nn.Embedding(vocab_size, embed_dim, dtype=self.dtype, device=self.device)
         
-        # --- Encoder ---
-        self.encoder = gemma_1_2b_Encoder(num_layers=num_layers,embed_dim=embed_dim,num_heads=num_heads,dropout=dropout,
+        # --- Decoder ---
+        self.decoder = gemma_1_2b_Decoder(num_layers=num_layers,embed_dim=embed_dim,num_heads=num_heads,dropout=dropout,
                                     hidden_dim=hidden_dim,eps=eps,device=self.device,dtype=self.dtype)
         
         # --- Final norm        
@@ -74,7 +74,7 @@ class gemma_1_2b(nn.Module):
     def forward(self, x):
         # x shape: (batch_size, seq_len)
         emb = self.embedding(x)  # (batch_size, seq_len, embed_dim)
-        x = self.encoder(emb)
+        x = self.decoder(emb)
         x = self.final_norm(x)
         x = self.lm_head(x)
         return x
@@ -112,8 +112,8 @@ class gemma_1_7b_block(nn.Module):
         
         return x
     
-# --- Encoder ---
-class gemma_1_7b_Encoder(nn.Module):
+# --- Decoder ---
+class gemma_1_7b_Decoder(nn.Module):
     def __init__(self, num_layers, embed_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
         self.layers = nn.ModuleList([
@@ -137,8 +137,8 @@ class gemma_1_7b(nn.Module):
         # --- Token embedding ---
         self.embedding = nn.Embedding(vocab_size, embed_dim, dtype=self.dtype, device=self.device)
         
-        # --- Encoder ---
-        self.encoder = gemma_1_7b_Encoder(num_layers=num_layers,embed_dim=embed_dim,num_heads=num_heads,dropout=dropout,
+        # --- Decoder ---
+        self.decoder = gemma_1_7b_Decoder(num_layers=num_layers,embed_dim=embed_dim,num_heads=num_heads,dropout=dropout,
                                     hidden_dim=hidden_dim,eps=eps,device=self.device,dtype=self.dtype)
         
         # --- Final norm        
@@ -150,7 +150,7 @@ class gemma_1_7b(nn.Module):
     def forward(self, x):
         # x shape: (batch_size, seq_len)
         emb = self.embedding(x)  # (batch_size, seq_len, embed_dim)
-        x = self.encoder(emb)
+        x = self.decoder(emb)
         x = self.final_norm(x)
         x = self.lm_head(x)
         return x

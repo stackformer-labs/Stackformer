@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class Self_Attention(nn.Module):
-    def __init__(self, embed_dim, dropout=0.1, device='cpu', dtype=torch.float32):
+    def __init__(self, embed_dim, dropout=0.1, qkv_bias=False,device='cpu', dtype=torch.float32):
         super().__init__()
         self.embed_dim = embed_dim
         self.device = device
@@ -14,9 +14,9 @@ class Self_Attention(nn.Module):
         self.scale = 1.0 / math.sqrt(embed_dim)
 
         # Linear layer
-        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
-        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
-        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
+        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
+        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
         
         # Output projection layer to map attention output back to input dimension
         self.out_proj = nn.Linear(embed_dim, embed_dim, device=device, dtype=dtype)
@@ -66,7 +66,7 @@ class Self_Attention(nn.Module):
         return self.out_proj(out)  # Shape: (B, T, C)
 
 class Multi_Head_Attention(nn.Module):
-    def __init__(self, embed_dim, num_heads, dropout=0.1, device='cpu', dtype=torch.float32):
+    def __init__(self, embed_dim, num_heads, dropout=0.1, qkv_bias=False,device='cpu', dtype=torch.float32):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
 
@@ -78,12 +78,12 @@ class Multi_Head_Attention(nn.Module):
         self.dtype = dtype
 
         # Linear layer
-        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
-        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
-        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
+        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
+        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
         
         # Final output projection after attention
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
         
         self.dropout = nn.Dropout(dropout)
 
@@ -135,7 +135,7 @@ class Multi_Head_Attention(nn.Module):
         return self.out_proj(out)  # (B, T, C)
 
 class Multi_Head_Attention_With_RoPE(nn.Module):
-    def __init__(self, embed_dim, num_heads, dropout=0.1, device='cpu', dtype=torch.float32):
+    def __init__(self, embed_dim, num_heads, dropout=0.1,  qkv_bias=False,device='cpu', dtype=torch.float32):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
 
@@ -147,12 +147,12 @@ class Multi_Head_Attention_With_RoPE(nn.Module):
         self.dtype = dtype
 
         # Linear layer
-        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
-        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
-        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
+        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
+        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
         
         # Final output projection after attention
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
         
         self.dropout = nn.Dropout(dropout)
 
@@ -232,7 +232,7 @@ class Multi_Head_Attention_With_RoPE(nn.Module):
         return self.out_proj(out)  # (B, T, C)
 
 class Cross_MultiHead_Attention(nn.Module):
-    def __init__(self, embed_dim, num_heads, dropout=0.1, device='cpu', dtype=torch.float32):
+    def __init__(self, embed_dim, num_heads, dropout=0.1, qkv_bias=False,device='cpu', dtype=torch.float32):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
 
@@ -244,12 +244,12 @@ class Cross_MultiHead_Attention(nn.Module):
         self.dtype = dtype
 
         # Linear layer
-        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
-        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
-        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
+        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
+        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
 
         # Final output projection
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
         self.dropout = nn.Dropout(dropout)
 
         # Cache for causal masks (optional)
@@ -304,7 +304,7 @@ class Cross_MultiHead_Attention(nn.Module):
         return self.out_proj(out)
     
 class Multi_query_Attention(nn.Module):
-    def __init__(self, embed_dim, num_heads, dropout=0.1, device='cpu', dtype=torch.float32):
+    def __init__(self, embed_dim, num_heads, dropout=0.1, qkv_bias=False,device='cpu', dtype=torch.float32):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
 
@@ -316,12 +316,12 @@ class Multi_query_Attention(nn.Module):
         self.dtype = dtype
 
         # Projection layers
-        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
-        self.k_proj = nn.Linear(embed_dim, self.head_dim, bias=False, device=device, dtype=self.dtype)
-        self.v_proj = nn.Linear(embed_dim, self.head_dim, bias=False, device=device, dtype=self.dtype)
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
+        self.k_proj = nn.Linear(embed_dim, self.head_dim, bias=qkv_bias, device=device, dtype=self.dtype)
+        self.v_proj = nn.Linear(embed_dim, self.head_dim, bias=qkv_bias, device=device, dtype=self.dtype)
         
         # Output final projection
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
 
         self.dropout = nn.Dropout(dropout)
 
@@ -374,7 +374,7 @@ class Multi_query_Attention(nn.Module):
         return self.out_proj(out)  # Final linear projection
     
 class Multi_query_Attention_With_RoPE(nn.Module):
-    def __init__(self, embed_dim, num_heads, dropout=0.1, device='cpu', dtype=torch.float32):
+    def __init__(self, embed_dim, num_heads, dropout=0.1, qkv_bias=False,device='cpu', dtype=torch.float32):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
 
@@ -386,12 +386,12 @@ class Multi_query_Attention_With_RoPE(nn.Module):
         self.dtype = dtype
 
         # Projection layers
-        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
-        self.k_proj = nn.Linear(embed_dim, self.head_dim, bias=False, device=device, dtype=self.dtype)
-        self.v_proj = nn.Linear(embed_dim, self.head_dim, bias=False, device=device, dtype=self.dtype)
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
+        self.k_proj = nn.Linear(embed_dim, self.head_dim, bias=qkv_bias, device=device, dtype=self.dtype)
+        self.v_proj = nn.Linear(embed_dim, self.head_dim, bias=qkv_bias, device=device, dtype=self.dtype)
         
         # Output final projection
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
 
         self.dropout = nn.Dropout(dropout)
 
@@ -472,7 +472,7 @@ class Multi_query_Attention_With_RoPE(nn.Module):
         return self.out_proj(out)  # Final linear projection
 
 class Group_query_Attention(nn.Module):
-    def __init__(self, embed_dim, num_query_heads, num_kv_heads, dropout=0.1, device='cpu', dtype=torch.float32):
+    def __init__(self, embed_dim, num_query_heads, num_kv_heads, qkv_bias=False,dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
         assert embed_dim % num_query_heads == 0, "embed_dim must be divisible by num_query_heads"
         assert num_query_heads % num_kv_heads == 0, "num_query_heads must be divisible by num_kv_heads"
@@ -488,10 +488,10 @@ class Group_query_Attention(nn.Module):
         self.device = device
 
         # Projection layers
-        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
-        self.k_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim, bias=False, device=device, dtype=dtype)
-        self.v_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim, bias=False, device=device, dtype=dtype)
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
+        self.k_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim, bias=qkv_bias, device=device, dtype=dtype)
+        self.v_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim, bias=qkv_bias, device=device, dtype=dtype)
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
 
         self.dropout = nn.Dropout(dropout)
         self._causal_mask_cache = {}
@@ -539,7 +539,7 @@ class Group_query_Attention(nn.Module):
         return self.out_proj(out)
     
 class Group_query_Attention_With_RoPE(nn.Module):
-    def __init__(self, embed_dim, num_query_heads, num_kv_heads, dropout=0.1, device='cpu', dtype=torch.float32):
+    def __init__(self, embed_dim, num_query_heads, num_kv_heads, qkv_bias=False, dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
         assert embed_dim % num_query_heads == 0, "embed_dim must be divisible by num_query_heads"
         assert num_query_heads % num_kv_heads == 0, "num_query_heads must be divisible by num_kv_heads"
@@ -555,10 +555,10 @@ class Group_query_Attention_With_RoPE(nn.Module):
         self.device = device
 
         # Projection layers
-        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
-        self.k_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim, bias=False, device=device, dtype=dtype)
-        self.v_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim, bias=False, device=device, dtype=dtype)
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
+        self.k_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim, bias=qkv_bias, device=device, dtype=dtype)
+        self.v_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim, bias=qkv_bias, device=device, dtype=dtype)
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
 
         self.dropout = nn.Dropout(dropout)
         self._causal_mask_cache = {}
@@ -634,7 +634,7 @@ class Group_query_Attention_With_RoPE(nn.Module):
         return self.out_proj(out)
 
 class Local_Attention(nn.Module):
-    def __init__(self, embed_dim, num_heads, window_size, dropout=0.1, device='cpu', dtype=torch.float32):
+    def __init__(self, embed_dim, num_heads, window_size, qkv_bias=False,dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
 
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
@@ -649,12 +649,12 @@ class Local_Attention(nn.Module):
         self.dtype = dtype
 
         # QKV projection
-        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
-        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
-        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
+        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
+        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
         
         # Final output projection
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=self.dtype)
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
         self.dropout = nn.Dropout(dropout)
 
         # Cache causal masks for efficiency
@@ -702,7 +702,7 @@ class Local_Attention(nn.Module):
         return self.out_proj(out)
 
 class kv_cache_multihead(nn.Module):
-    def __init__(self, embed_dim, num_heads, batch_size, kv_seq_len, dropout=0.1, device='cpu', dtype=torch.float32):
+    def __init__(self, embed_dim, num_heads, batch_size, kv_seq_len, qkv_bias=False, dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
 
@@ -714,12 +714,12 @@ class kv_cache_multihead(nn.Module):
         self.dtype = dtype
         
         #  QKV projection
-        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
-        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
-        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
+        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
+        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
         
         # Final output projection
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
         self.dropout = nn.Dropout(dropout)
 
         # KV Cache (double kv_seq_len to avoid OOB)
@@ -809,7 +809,7 @@ class kv_cache_multihead(nn.Module):
         return self.out_proj(out)
 
 class kv_cache_group_query(nn.Module):  
-    def __init__(self, embed_dim, num_query_heads, num_kv_heads, kv_seq_len, batch_size, dropout=0.1, device='cpu', dtype=torch.float32):
+    def __init__(self, embed_dim, num_query_heads, num_kv_heads, kv_seq_len, batch_size, qkv_bias=False, dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
         assert embed_dim % num_query_heads == 0, "embed_dim must be divisible by num_query_heads"
         assert num_query_heads % num_kv_heads == 0, "num_query_heads must be divisible by num_kv_heads"
@@ -825,10 +825,10 @@ class kv_cache_group_query(nn.Module):
         self.dtype = dtype
 
         # Linear projections: Q from full dim, KV from reduced dim
-        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
-        self.k_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim, bias=False, device=device, dtype=dtype)
-        self.v_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim, bias=False, device=device, dtype=dtype)
-        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False, device=device, dtype=dtype)
+        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
+        self.k_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim, bias=qkv_bias, device=device, dtype=dtype)
+        self.v_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim, bias=qkv_bias, device=device, dtype=dtype)
+        self.out_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
 
         self.dropout = nn.Dropout(dropout)
         self._causal_mask_cache = {}
