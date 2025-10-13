@@ -1,13 +1,13 @@
 [project]
 name = "Stackformer"
-version = "0.1.5"
+version = "0.1.6"
 description = "Modular transformer blocks built in PyTorch"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 
 authors = [
-  {name = "Gurumurthy", email = "gurumurthy.00300@gmail.com"}
+  { name = "Gurumurthy", email = "gurumurthy.00300@gmail.com" }
 ]
 
 dependencies = [
@@ -26,6 +26,10 @@ classifiers = [
 Repository = "https://github.com/Gurumurthy30/Stackformer"
 "Issue Tracker" = "https://github.com/Gurumurthy30/Stackformer/issues"
 Discussions = "https://github.com/Gurumurthy30/Stackformer/discussions"
+
+[tool.setuptools.packages.find]
+include = ["stackformer*"]
+exclude = ["assets*"]
 
 [build-system]
 requires = ["setuptools>=61", "wheel"]

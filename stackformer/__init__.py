@@ -42,7 +42,8 @@ from .models.Google import gemma_1_7b
 from .models.Transformer import transformer
 
 # --- Vision models ---
-from .vision_models.vit import ViT
+from .vision_models.Classification import ViT
+from .vision_models.Segmentation import SegFormerB0
 
 # --- Trainer ---
 from .trainer import Trainer

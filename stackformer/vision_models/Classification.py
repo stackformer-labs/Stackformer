@@ -32,7 +32,7 @@ class Block(nn.Module):
     def __init__(self, Emb_dim, num_heads, dropout, hidden_dim, eps=1e-5, device=None, dtype=torch.float32):
         super().__init__()
         # Don't pass device to submodules - let them be moved with .to() later
-        self.attention = Multi_Head_Attention(Emb_dim, num_heads, dropout, device=device, dtype=dtype)
+        self.attention = Multi_Head_Attention(Emb_dim, num_heads, dropout, qkv_bias=True,device=device, dtype=dtype)
         self.norm1 = nn.LayerNorm(Emb_dim, eps=eps, dtype=dtype)
         self.ff_relu = FF_ReLU(Emb_dim, hidden_dim, dropout, device=device, dtype=dtype)
         self.norm2 = nn.LayerNorm(Emb_dim, eps=eps, dtype=dtype)
