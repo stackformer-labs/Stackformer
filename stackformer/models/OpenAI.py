@@ -121,7 +121,7 @@ class GPT_1(nn.Module):
         self.seq_len = seq_len
 
         self.embedding = nn.Embedding(vocab_size, embed_dim, device=device, dtype=dtype)
-        self.position_embedding = AbsolutePositionEmbedding(embed_dim, seq_len, device=device, dtype=dtype)
+        self.position_embedding = AbsolutePositionEmbedding(seq_len, embed_dim, device=device, dtype=dtype)
 
         self.decoder = GPT_1_Decoder(
             num_layers=num_layers,
@@ -258,7 +258,7 @@ class GPT_2(nn.Module):
         super().__init__()
 
         self.embedding = nn.Embedding(vocab_size, embed_dim, device=device, dtype=dtype)
-        self.position_embedding = AbsolutePositionEmbedding(embed_dim, seq_len, device=device, dtype=dtype)
+        self.position_embedding = AbsolutePositionEmbedding(seq_len, embed_dim, device=device, dtype=dtype)
 
         self.decoder = GPT_2_Decoder(
             num_layers=num_layers,
