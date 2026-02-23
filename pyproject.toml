@@ -4,7 +4,7 @@ version = "0.1.6"
 description = "Modular transformer blocks built in PyTorch"
 readme = "README.md"
 requires-python = ">=3.9"
-license = "MIT"
+license = { text = "MIT" }
 
 authors = [
   { name = "Gurumurthy", email = "gurumurthy.00300@gmail.com" }
@@ -12,25 +12,40 @@ authors = [
 
 dependencies = [
   "torch>=2.0,<2.7",
-  "tqdm>=4.5,<5.0"
+  "tqdm>=4.5,<5.0",
+  "tiktoken>=0.7,<1.0"
 ]
 
 classifiers = [
   "Programming Language :: Python :: 3",
+  "Typing :: Typed",
   "Operating System :: OS Independent",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Topic :: Software Development :: Libraries :: Python Modules"
 ]
 
+[project.optional-dependencies]
+train = [
+  "transformers>=4.40,<5.0"
+]
+dev = [
+  "pytest>=8.0,<9.0"
+]
+
 [project.urls]
 Repository = "https://github.com/Gurumurthy30/Stackformer"
-"Issue Tracker" = "https://github.com/Gurumurthy30/Stackformer/issues"
+Releases = "https://github.com/Gurumurthy30/Stackformer/releases"
+Issue Tracker = "https://github.com/Gurumurthy30/Stackformer/issues"
 Discussions = "https://github.com/Gurumurthy30/Stackformer/discussions"
 
 [tool.setuptools.packages.find]
+where = ["src"]
 include = ["stackformer*"]
 exclude = ["assets*"]
 
 [build-system]
 requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-data]
+stackformer = ["py.typed"]
