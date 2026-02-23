@@ -104,7 +104,7 @@ class SinusoidalPositionalEmbedding(nn.Module):
         pe[:, 0::2] = torch.sin(position * div_term)  # even dims
         pe[:, 1::2] = torch.cos(position * div_term)  # odd dims
 
-        self.register_buffer("pe", pe, device=self.device, dtype=self.dtype)
+        self.register_buffer("pe", pe.to(device=self.device, dtype=self.dtype))
 
     def forward(self, x):
         batch_size, seq_len = x.shape[0], x.shape[1]

@@ -3,7 +3,6 @@ import os
 from torch.utils.data import Dataset,DataLoader,Subset
 from torch.optim import AdamW, SGD
 from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR, CosineAnnealingWarmRestarts
-from transformers import get_linear_schedule_with_warmup, get_cosine_schedule_with_warmup, get_cosine_with_hard_restarts_schedule_with_warmup
 from tqdm import tqdm
 from typing import Literal
 
@@ -118,6 +117,25 @@ class Trainer:
         if self.device == 'cuda' and torch.cuda.is_available(): 
             torch.cuda.manual_seed_all(seed)
         
+    def _get_hf_schedulers(self):
+        try:
+            from transformers import (
+                get_cosine_schedule_with_warmup,
+                get_cosine_with_hard_restarts_schedule_with_warmup,
+                get_linear_schedule_with_warmup,
+            )
+        except Exception as exc:
+            raise ImportError(
+                "transformers is required for scheduler_type in {'linear', 'cosine', 'cosine_restarts'}. "
+                "Install optional dependencies with `pip install stackformer[train]`."
+            ) from exc
+
+        return (
+            get_linear_schedule_with_warmup,
+            get_cosine_schedule_with_warmup,
+            get_cosine_with_hard_restarts_schedule_with_warmup,
+        )
+
     def get_scheduler(self, scheduler_type, total_training_steps, optimizer):
         """
         Create and return a learning rate scheduler.
@@ -125,18 +143,21 @@ class Trainer:
         if scheduler_type is None:
             return None
         elif scheduler_type == "linear":
+            get_linear_schedule_with_warmup, _, _ = self._get_hf_schedulers()
             return get_linear_schedule_with_warmup(
                 optimizer, 
                 num_warmup_steps=self.warmup_steps, 
                 num_training_steps=total_training_steps
             )
         elif scheduler_type == "cosine":
+            _, get_cosine_schedule_with_warmup, _ = self._get_hf_schedulers()
             return get_cosine_schedule_with_warmup(
                 optimizer,
                 num_warmup_steps=self.warmup_steps,
                 num_training_steps=total_training_steps
             )
         elif scheduler_type == "cosine_restarts":
+            _, _, get_cosine_with_hard_restarts_schedule_with_warmup = self._get_hf_schedulers()
             return get_cosine_with_hard_restarts_schedule_with_warmup(
                 optimizer,
                 num_warmup_steps=self.warmup_steps,
