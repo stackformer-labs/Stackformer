@@ -52,6 +52,7 @@ print(logits.shape)  # torch.Size([2, 16, 128])
 - **Topics**: https://github.com/Gurumurthy30/Stackformer/topics
 - **Releases**: https://github.com/Gurumurthy30/Stackformer/releases
 - **Packages**: https://github.com/Gurumurthy30/Stackformer/pkgs/container
+- **Releases**: https://github.com/Gurumurthy30/Stackformer/releases
 - **Issues**: https://github.com/Gurumurthy30/Stackformer/issues
 - **Discussions**: https://github.com/Gurumurthy30/Stackformer/discussions
 
