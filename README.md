@@ -6,7 +6,7 @@ A lightweight, modular Transformer library in PyTorch.
 - Reusable Transformer modules (attention, normalization, feed-forward, positional encodings)
 - Reference language model implementations (GPT-style, LLaMA-style, Gemma-style)
 - Vision Transformer (`ViT`)
-- Training and text-generation utilities
+- Training and text-generation utilities (including Stackformer `Trainer`)
 
 ## Installation
 
@@ -14,7 +14,7 @@ A lightweight, modular Transformer library in PyTorch.
 pip install stackformer
 ```
 
-For training schedulers from Hugging Face Transformers:
+For Stackformer `Trainer` scheduler integrations that use Hugging Face `transformers`:
 
 ```bash
 pip install "stackformer[train]"
@@ -46,6 +46,14 @@ x = torch.randint(0, 128, (2, 16))
 logits = model(x)
 print(logits.shape)  # torch.Size([2, 16, 128])
 ```
+
+## Repository details
+- **Website/Home**: https://github.com/Gurumurthy30/Stackformer
+- **Topics**: https://github.com/Gurumurthy30/Stackformer/topics
+- **Releases**: https://github.com/Gurumurthy30/Stackformer/releases
+- **Packages**: https://github.com/Gurumurthy30/Stackformer/pkgs/container
+- **Issues**: https://github.com/Gurumurthy30/Stackformer/issues
+- **Discussions**: https://github.com/Gurumurthy30/Stackformer/discussions
 
 ## API stability
 - Public exports are listed in `stackformer.__all__`.

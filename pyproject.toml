@@ -33,7 +33,9 @@ classifiers = [
 ]
 
 [project.urls]
+Homepage = "https://github.com/Gurumurthy30/Stackformer"
 Repository = "https://github.com/Gurumurthy30/Stackformer"
+Releases = "https://github.com/Gurumurthy30/Stackformer/releases"
 "Issue Tracker" = "https://github.com/Gurumurthy30/Stackformer/issues"
 Discussions = "https://github.com/Gurumurthy30/Stackformer/discussions"
 
