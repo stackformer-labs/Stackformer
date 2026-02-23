@@ -126,57 +126,71 @@ class transformer_encoder(nn.Module):
 class Encoder(nn.Module):
     def __init__(self):
         super().__init__()
+
         # SegFormer B0 configuration
-        self.s1 = patch(img_size=224, in_channels=3, out_channels=32, kernel=7, stride=4, padding=3)
-        self.te1 = transformer_encoder(num_layers=2, embed_dim=32, num_heads=1, hidden_dim=32*8, dropout=0.0, reduction=8)
-        
-        self.s2 = patch(img_size=56, in_channels=32, out_channels=64, kernel=3, stride=2, padding=1)
-        self.te2 = transformer_encoder(num_layers=2, embed_dim=64, num_heads=2, hidden_dim=64*4, dropout=0.0, reduction=4)
-        
-        self.s3 = patch(img_size=28, in_channels=64, out_channels=160, kernel=3, stride=2, padding=1)
-        self.te3 = transformer_encoder(num_layers=2, embed_dim=160, num_heads=5, hidden_dim=160*4, dropout=0.0, reduction=2)
-        
-        self.s4 = patch(img_size=14, in_channels=160, out_channels=256, kernel=3, stride=2, padding=1)
-        self.te4 = transformer_encoder(num_layers=2, embed_dim=256, num_heads=8, hidden_dim=256*4, dropout=0.0, reduction=1)
-        
+        self.s1 = patch(img_size=224, in_channels=3, out_channels=32,
+                        kernel=7, stride=4, padding=3)
+        self.te1 = transformer_encoder(
+            num_layers=2, embed_dim=32, num_heads=1,
+            hidden_dim=32 * 8, dropout=0.0, reduction=8
+        )
+
+        self.s2 = patch(img_size=56, in_channels=32, out_channels=64,
+                        kernel=3, stride=2, padding=1)
+        self.te2 = transformer_encoder(
+            num_layers=2, embed_dim=64, num_heads=2,
+            hidden_dim=64 * 4, dropout=0.0, reduction=4
+        )
+
+        self.s3 = patch(img_size=28, in_channels=64, out_channels=160,
+                        kernel=3, stride=2, padding=1)
+        self.te3 = transformer_encoder(
+            num_layers=2, embed_dim=160, num_heads=5,
+            hidden_dim=160 * 4, dropout=0.0, reduction=2
+        )
+
+        self.s4 = patch(img_size=14, in_channels=160, out_channels=256,
+                        kernel=3, stride=2, padding=1)
+        self.te4 = transformer_encoder(
+            num_layers=2, embed_dim=256, num_heads=8,
+            hidden_dim=256 * 4, dropout=0.0, reduction=1
+        )
+
     def forward(self, x):
-        # Stage 1: 224x224 -> 56x56
-        x1 = self.s1(x)  # (B, 3136, 32)
-        f1 = self.te1(x1)  # (B, 3136, 32)
-        
-        # Reshape back to spatial for next stage
-        B = x1.shape[0]
-        H1, W1 = 56, 56  # 224//4 = 56
-        f1_spatial = f1.transpose(1, 2).reshape(B, 32, H1, W1)
-        
-        # Stage 2: 56x56 -> 28x28
-        x2 = self.s2(f1_spatial)  # (B, 784, 64)
-        f2 = self.te2(x2)  # (B, 784, 64)
-        
-        H2, W2 = 28, 28  # 56//2 = 28
-        f2_spatial = f2.transpose(1, 2).reshape(B, 64, H2, W2)
-        
-        # Stage 3: 28x28 -> 14x14
-        x3 = self.s3(f2_spatial)  # (B, 196, 160)
-        f3 = self.te3(x3)  # (B, 196, 160)
-        
-        H3, W3 = 14, 14  # 28//2 = 14
-        f3_spatial = f3.transpose(1, 2).reshape(B, 160, H3, W3)
-        
-        # Stage 4: 14x14 -> 7x7
-        x4 = self.s4(f3_spatial)  # (B, 49, 256)
-        f4 = self.te4(x4)  # (B, 49, 256)
-        
-        H4, W4 = 7, 7  # 14//2 = 7
-        f4_spatial = f4.transpose(1, 2).reshape(B, 256, H4, W4)
-        
-        # Convert back to spatial format for MLP decoder
-        f1_out = f1.transpose(1, 2).reshape(B, 32, H1, W1)
-        f2_out = f2.transpose(1, 2).reshape(B, 64, H2, W2)
-        f3_out = f3.transpose(1, 2).reshape(B, 160, H3, W3)
-        f4_out = f4_spatial
-        
-        return f1_out, f2_out, f3_out, f4_out
+
+        # ---------------- Stage 1 ----------------
+        x1 = self.s1(x)          # (B, N1, 32)
+        f1 = self.te1(x1)
+
+        B, N1, C1 = f1.shape
+        H1 = W1 = int(N1 ** 0.5)
+        f1_spatial = f1.transpose(1, 2).reshape(B, C1, H1, W1)
+
+        # ---------------- Stage 2 ----------------
+        x2 = self.s2(f1_spatial)  # (B, N2, 64)
+        f2 = self.te2(x2)
+
+        B, N2, C2 = f2.shape
+        H2 = W2 = int(N2 ** 0.5)
+        f2_spatial = f2.transpose(1, 2).reshape(B, C2, H2, W2)
+
+        # ---------------- Stage 3 ----------------
+        x3 = self.s3(f2_spatial)  # (B, N3, 160)
+        f3 = self.te3(x3)
+
+        B, N3, C3 = f3.shape
+        H3 = W3 = int(N3 ** 0.5)
+        f3_spatial = f3.transpose(1, 2).reshape(B, C3, H3, W3)
+
+        # ---------------- Stage 4 ----------------
+        x4 = self.s4(f3_spatial)  # (B, N4, 256)
+        f4 = self.te4(x4)
+
+        B, N4, C4 = f4.shape
+        H4 = W4 = int(N4 ** 0.5)
+        f4_spatial = f4.transpose(1, 2).reshape(B, C4, H4, W4)
+
+        return f1_spatial, f2_spatial, f3_spatial, f4_spatial
 
 class MLP(nn.Module):
     def __init__(self, out_dim=150):  # 150 classes for ADE20K
