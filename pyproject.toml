@@ -35,7 +35,7 @@ dev = [
 [project.urls]
 Repository = "https://github.com/Gurumurthy30/Stackformer"
 Releases = "https://github.com/Gurumurthy30/Stackformer/releases"
-Issue Tracker = "https://github.com/Gurumurthy30/Stackformer/issues"
+Issue-Tracker = "https://github.com/Gurumurthy30/Stackformer/issues"
 Discussions = "https://github.com/Gurumurthy30/Stackformer/discussions"
 
 [tool.setuptools.packages.find]
