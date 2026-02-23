@@ -16,20 +16,20 @@ dependencies = [
   "tiktoken>=0.7,<1.0"
 ]
 
-[project.optional-dependencies]
-train = [
-  "transformers>=4.40,<5.0"
-]
-dev = [
-  "pytest>=8.0,<9.0"
-]
-
 classifiers = [
   "Programming Language :: Python :: 3",
   "Typing :: Typed",
   "Operating System :: OS Independent",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Topic :: Software Development :: Libraries :: Python Modules"
+]
+
+[project.optional-dependencies]
+train = [
+  "transformers>=4.40,<5.0"
+]
+dev = [
+  "pytest>=8.0,<9.0"
 ]
 
 [project.urls]

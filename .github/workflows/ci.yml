@@ -20,13 +20,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: Upgrade build tools
+      - name: Upgrade pip
         run: |
-          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install --upgrade pip
 
       - name: Install project + test dependencies
         run: |
-          python -m pip install ".[dev,train]"
+          python -m pip install --no-build-isolation ".[dev,train]"
 
       - name: Run tests
         run: |
