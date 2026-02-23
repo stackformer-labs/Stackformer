@@ -49,8 +49,8 @@ from .models.OpenAI import GPT_2
 from .models.Transformer import transformer
 
 # --- Vision models ---
-from .vision_models.Classification import ViT
-from .vision_models.Segmentation import SegFormerB0
+from .vision.vit import ViT
+from .vision.segformer import SegFormerB0
 
 # --- Generate ---
 from .generate import text_generate
