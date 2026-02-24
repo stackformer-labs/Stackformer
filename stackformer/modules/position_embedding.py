@@ -1,23 +1,13 @@
-"""
-Positional Embeddings for StackFormer Library
+"""Positional encoding modules for Stackformer attention blocks.
 
-This module implements various positional encoding techniques that inject positional 
-information into input embeddings for transformer architectures. Included are:
+Transformers are permutation-invariant over tokens unless position information is
+injected. This module implements three common strategies:
+- AbsolutePositionEmbedding: learned lookup by index
+- SinusoidalPositionalEmbedding: deterministic sine/cosine basis
+- RoPE: rotary relative-position encoding in complex space
 
-1. AbsolutePositionalEmbedding
-    - Learns a unique embedding vector for each position up to a fixed maximum.
-    - Simple and effective for fixed-length input sequences.
-
-2. SinusoidalPositionalEmbedding
-    - Uses deterministic sine and cosine functions of different frequencies.
-    - Generalizes to longer sequences without additional parameters.
-
-3. RotaryPositionalEmbedding (RoPE)
-    - Encodes relative positional information by rotating query/key vectors in complex space.
-    - Supports extrapolation and improves attention patterns in autoregressive models.
-
-Each method is implemented in PyTorch and designed to be easily pluggable into 
-transformer-based models.
+These embeddings are designed to plug into token embeddings or Q/K tensors in
+attention layers.
 """
 
 import math
@@ -25,29 +15,31 @@ import torch
 import torch.nn as nn
 
 class AbsolutePositionEmbedding(nn.Module):
-    """
-    Learnable absolute positional embedding using a standard embedding layer.
+    """Learned absolute positional embedding table.
 
-    Formula:
-        For each position p in sequence length:
-            - Learn a unique embedding vector: embedding(p) ∈ R^D
-        For input x of shape (B, T), where B = batch size, T = sequence length:
-            - Output shape: (B, T, D)
+    Constructor args:
+        seq_len (int, required): Maximum supported position index.
+        embed_dim (int, required): Positional vector size ``D``.
+        device (optional, default='cpu').
+        dtype (optional, default=torch.float32).
 
-    Args:
-        seq_len (int): Maximum sequence length
-        embed_dim (int): Embedding dimension (D)
-
-    Forward Args:
-        x (Tensor): Shape (B, T, ...). Only x.shape[0] and x.shape[1] are used.
+    Forward args:
+        x (torch.Tensor): Any tensor with leading shape ``(B, T, ...)``. Only
+            ``B`` and ``T`` are used.
 
     Returns:
-        Tensor: Positional embeddings of shape (B, T, D)
+        torch.Tensor: Positional vectors of shape ``(B, T, D)``.
+
+    Rule:
+        Runtime ``T`` must satisfy ``T <= seq_len``.
 
     Example:
         >>> pos_emb = AbsolutePositionEmbedding(seq_len=512, embed_dim=128)
-        >>> x = torch.randn(4, 32, 128)  # (B=4, T=32, D=128)
-        >>> pos = pos_emb(x)  # (4, 32, 128)
+        >>> x = torch.randn(4, 32, 128)
+        >>> pos = pos_emb(x)
+        >>> pos.shape
+        torch.Size([4, 32, 128])
+    
     """
     def __init__(self, seq_len, embed_dim, device='cpu', dtype=torch.float32):
         super().__init__()
@@ -64,31 +56,35 @@ class AbsolutePositionEmbedding(nn.Module):
         return out
 
 class SinusoidalPositionalEmbedding(nn.Module):
-    """
-    Fixed sinusoidal positional embedding used in the original Transformer.
+    """Deterministic sinusoidal positional encoding.
 
-    Formula:
-        For each position p and dimension i:
-            - PE[p, 2i] = sin(p / (10000^(2i / D)))
-            - PE[p, 2i+1] = cos(p / (10000^(2i / D)))
+    Formula for position ``p`` and channel pair ``i``:
+        PE[p, 2i]   = sin(p / 10000^(2i/D))
+        PE[p, 2i+1] = cos(p / 10000^(2i/D))
 
-    Input:
-        x of shape (B, T, D) or (B, T)
+    Constructor args:
+        seq_len (int, required): Maximum precomputed sequence length.
+        embed_dim (int, required): Encoding size ``D``.
+        device (optional, default='cpu').
+        dtype (optional, default=torch.float32).
 
-    Output:
-        Positional encoding tensor of shape (B, T, D)
-
-    Args:
-        seq_len (int): Maximum sequence length
-        embed_dim (int): Embedding dimension (must be even)
+    Forward args:
+        x (torch.Tensor): Shape ``(B, T, ...)`` where only ``B`` and ``T`` are
+            consumed.
 
     Returns:
-        Tensor: Sinusoidal encoding (B, T, D)
+        torch.Tensor: Shape ``(B, T, D)``.
+
+    Rule:
+        Runtime ``T`` must satisfy ``T <= seq_len`` (buffer is precomputed).
 
     Example:
-        >>> pe = SinusoidalPositionalEmbedding(seq_len=512, embed_dim=128)
+        >>> pos_emb = SinusoidalPositionalEmbedding(seq_len=512, embed_dim=128)
         >>> x = torch.randn(4, 32, 128)
-        >>> pos = pe(x)  # (4, 32, 128)
+        >>> pos = pos_emb(x)
+        >>> pos.shape
+        torch.Size([4, 32, 128])
+    
     """
     def __init__(self, seq_len, embed_dim, device='cpu', dtype=torch.float32):
         super().__init__()
@@ -112,6 +108,35 @@ class SinusoidalPositionalEmbedding(nn.Module):
         return out.to(device=self.device, dtype=self.dtype)
 
 class RoPE(nn.Module):
+    """Rotary positional embedding for attention query/key tensors.
+
+    RoPE rotates each 2D pair in head dimension by a position-dependent angle,
+    encoding relative position directly into dot-product attention.
+
+    Constructor args:
+        head_dim (int, required): Per-head size ``D``. Rule: must be even.
+        seq_len (int, required): Maximum supported sequence length.
+        theta (float, optional, default=10000.0): Frequency base.
+        device (optional, default='cpu').
+        dtype (optional, default=torch.float32).
+
+    Forward args:
+        x (torch.Tensor): Shape ``(B, H, T, D)``.
+
+    Returns:
+        torch.Tensor: Shape ``(B, H, T, D)`` with rotary transform applied.
+
+    Rules:
+        - ``D`` must be even.
+        - Runtime ``T`` must satisfy ``T <= seq_len``.
+
+    Example:
+        >>> rope = RoPE(head_dim=64, seq_len=512)
+        >>> q = torch.randn(2, 8, 32, 64)
+        >>> q_rot = rope(q)
+        >>> q_rot.shape
+        torch.Size([2, 8, 32, 64])
+    """
     def __init__(self, head_dim: int, seq_len: int, theta: float = 10000.0, device="cpu", dtype=torch.float32):
         super().__init__()
         self.head_dim = head_dim

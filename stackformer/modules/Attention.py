@@ -1,9 +1,75 @@
+"""Attention implementations used by Stackformer.
+
+This module provides a research-to-production set of attention operators:
+standard self-attention, RoPE variants, cross-attention, MQA/GQA, local-window
+attention, and KV-cache inference attention.
+
+Core equation used by almost all classes:
+
+    Attention(Q, K, V) = softmax((Q K^T) / sqrt(d_k) + M) V
+
+where ``M`` is usually a causal mask (``-inf`` on disallowed positions).
+
+Notation:
+- ``B``: batch size
+- ``T``: query sequence length (current tokens)
+- ``S``: key/value sequence length (context or cache length)
+- ``C``: embedding dimension
+- ``H``: number of query heads
+- ``D``: head dimension, usually ``C // H``
+
+Implementation notes:
+- Inputs are moved to ``device``/``dtype`` configured in each module.
+- Causal masks are cached by sequence shape to reduce allocation overhead.
+- RoPE modules require even head dimension (enforced with assertions).
+
+Quick start:
+    >>> import torch
+    >>> from stackformer.modules.Attention import Multi_Head_Attention
+    >>> x = torch.randn(2, 32, 256)
+    >>> attn = Multi_Head_Attention(embed_dim=256, num_heads=8)
+    >>> y = attn(x, mask=True)
+    >>> y.shape
+    torch.Size([2, 32, 256])
+"""
+
 import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 class Self_Attention(nn.Module):
+    """Single-head causal/self attention.
+
+    Mathematical form:
+        - Q = X W_q, K = X W_k, V = X W_v
+        - A = softmax((Q K^T) / sqrt(C) + M)
+        - Y = A V W_o
+
+    Constructor args:
+        embed_dim (int, required): Input/hidden size ``C``.
+        dropout (float, optional, default=0.1): Dropout probability on attention
+            probabilities after softmax.
+        qkv_bias (bool, optional, default=False): Enables bias terms in Q/K/V
+            projection layers.
+        device (str or torch.device, optional, default='cpu'): Parameter and
+            compute device.
+        dtype (torch.dtype, optional, default=torch.float32): Parameter and
+            compute dtype.
+
+    Forward args:
+        x (torch.Tensor, required): Shape ``(B, T, C)``.
+        mask (bool, optional, default=True): If True, applies autoregressive
+            causal masking (token i cannot attend to tokens > i).
+
+    Returns:
+        torch.Tensor: Shape ``(B, T, C)``.
+
+    Example:
+        >>> layer = Self_Attention(embed_dim=64, dropout=0.0)
+        >>> x = torch.randn(4, 32, 64)
+        >>> y = layer(x, mask=True)
+    """
     def __init__(self, embed_dim, dropout=0.1, qkv_bias=False,device='cpu', dtype=torch.float32):
         super().__init__()
         self.embed_dim = embed_dim
@@ -66,6 +132,35 @@ class Self_Attention(nn.Module):
         return self.out_proj(out)  # Shape: (B, T, C)
 
 class Multi_Head_Attention(nn.Module):
+    """Standard multi-head self-attention (MHA).
+
+    Why/when to use:
+    - Baseline attention for encoder and decoder blocks.
+    - Multiple heads learn different relation subspaces.
+
+    Constructor args:
+        embed_dim (int, required): Model width ``C``.
+        num_heads (int, required): Number of query heads ``H``.
+            Rule: ``embed_dim % num_heads == 0`` (enforced).
+        dropout (float, optional, default=0.1): Dropout on attention probs.
+        qkv_bias (bool, optional, default=False): Bias in Q/K/V projections.
+        device (str or torch.device, optional, default='cpu').
+        dtype (torch.dtype, optional, default=torch.float32).
+
+    Forward args:
+        x (torch.Tensor): ``(B, T, C)``.
+        mask (bool, optional, default=True): Apply causal mask.
+
+    Returns:
+        torch.Tensor: ``(B, T, C)``.
+
+    Complexity:
+        Time/memory are O(B * H * T^2 * D), dominated by attention matrix.
+
+    Example:
+        >>> layer = Multi_Head_Attention(embed_dim=512, num_heads=8)
+        >>> y = layer(torch.randn(2, 128, 512), mask=True)
+    """
     def __init__(self, embed_dim, num_heads, dropout=0.1, qkv_bias=False,device='cpu', dtype=torch.float32):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
@@ -135,6 +230,29 @@ class Multi_Head_Attention(nn.Module):
         return self.out_proj(out)  # (B, T, C)
 
 class Multi_Head_Attention_With_RoPE(nn.Module):
+    """Multi-head self-attention with Rotary Positional Embedding (RoPE).
+
+    RoPE applies a position-dependent 2D rotation on every pair of query/key
+    channels, injecting relative position directly into dot products.
+
+    Constructor args:
+        embed_dim (int, required).
+        num_heads (int, required).
+            Rules:
+            - ``embed_dim % num_heads == 0``
+            - ``head_dim`` must be even for RoPE pair-rotation.
+        dropout (float, optional, default=0.1).
+        qkv_bias (bool, optional, default=False).
+        device (optional, default='cpu').
+        dtype (optional, default=torch.float32).
+
+    Forward args:
+        x (torch.Tensor): ``(B, T, C)``.
+        mask (bool, optional, default=True).
+
+    Returns:
+        torch.Tensor: ``(B, T, C)``.
+    """
     def __init__(self, embed_dim, num_heads, dropout=0.1,  qkv_bias=False,device='cpu', dtype=torch.float32):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
@@ -232,6 +350,25 @@ class Multi_Head_Attention_With_RoPE(nn.Module):
         return self.out_proj(out)  # (B, T, C)
 
 class Cross_MultiHead_Attention(nn.Module):
+    """Cross-attention: queries from ``x``, keys/values from ``context``.
+
+    Constructor args:
+        embed_dim (int, required).
+        num_heads (int, required): ``embed_dim % num_heads == 0``.
+        dropout (float, optional, default=0.1).
+        qkv_bias (bool, optional, default=False).
+        device (optional, default='cpu').
+        dtype (optional, default=torch.float32).
+
+    Forward args:
+        x (torch.Tensor): Query tensor ``(B, T, C)``.
+        context (torch.Tensor): Key/value tensor ``(B, S, C)``.
+        mask (bool, optional, default=True): Applies causal mask only when
+            ``T == S`` in this implementation.
+
+    Returns:
+        torch.Tensor: ``(B, T, C)``.
+    """
     def __init__(self, embed_dim, num_heads, dropout=0.1, qkv_bias=False,device='cpu', dtype=torch.float32):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
@@ -304,6 +441,24 @@ class Cross_MultiHead_Attention(nn.Module):
         return self.out_proj(out)
     
 class Multi_query_Attention(nn.Module):
+    """Multi-Query Attention (MQA): many query heads, shared K/V head.
+
+    Constructor args:
+        embed_dim (int, required).
+        num_heads (int, required): Number of query heads. Rule:
+            ``embed_dim % num_heads == 0``.
+        dropout (float, optional, default=0.1).
+        qkv_bias (bool, optional, default=False).
+        device (optional, default='cpu').
+        dtype (optional, default=torch.float32).
+
+    Forward args:
+        x (torch.Tensor): ``(B, T, C)``.
+        mask (bool, optional, default=True).
+
+    Returns:
+        torch.Tensor: ``(B, T, C)``.
+    """
     def __init__(self, embed_dim, num_heads, dropout=0.1, qkv_bias=False,device='cpu', dtype=torch.float32):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
@@ -374,6 +529,24 @@ class Multi_query_Attention(nn.Module):
         return self.out_proj(out)  # Final linear projection
     
 class Multi_query_Attention_With_RoPE(nn.Module):
+    """MQA with RoPE on queries and shared keys.
+
+    Constructor args:
+        embed_dim (int, required).
+        num_heads (int, required): ``embed_dim % num_heads == 0`` and even
+            ``head_dim`` for RoPE.
+        dropout (float, optional, default=0.1).
+        qkv_bias (bool, optional, default=False).
+        device (optional, default='cpu').
+        dtype (optional, default=torch.float32).
+
+    Forward args:
+        x (torch.Tensor): ``(B, T, C)``.
+        mask (bool, optional, default=True).
+
+    Returns:
+        torch.Tensor: ``(B, T, C)``.
+    """
     def __init__(self, embed_dim, num_heads, dropout=0.1, qkv_bias=False,device='cpu', dtype=torch.float32):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
@@ -472,6 +645,24 @@ class Multi_query_Attention_With_RoPE(nn.Module):
         return self.out_proj(out)  # Final linear projection
 
 class Group_query_Attention(nn.Module):
+    """Grouped-Query Attention (GQA): intermediate between MHA and MQA.
+
+    Constructor args:
+        embed_dim (int, required).
+        num_query_heads (int, required): Rule ``embed_dim % num_query_heads == 0``.
+        num_kv_heads (int, required): Rule ``num_query_heads % num_kv_heads == 0``.
+        qkv_bias (bool, optional, default=False).
+        dropout (float, optional, default=0.1).
+        device (optional, default='cpu').
+        dtype (optional, default=torch.float32).
+
+    Forward args:
+        x (torch.Tensor): ``(B, T, C)``.
+        mask (bool, optional, default=True).
+
+    Returns:
+        torch.Tensor: ``(B, T, C)``.
+    """
     def __init__(self, embed_dim, num_query_heads, num_kv_heads, qkv_bias=False,dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
         assert embed_dim % num_query_heads == 0, "embed_dim must be divisible by num_query_heads"
@@ -539,6 +730,27 @@ class Group_query_Attention(nn.Module):
         return self.out_proj(out)
     
 class Group_query_Attention_With_RoPE(nn.Module):
+    """GQA with RoPE for relative-position-aware grouped attention.
+
+    Constructor args:
+        embed_dim (int, required).
+        num_query_heads (int, required): ``embed_dim % num_query_heads == 0``.
+        num_kv_heads (int, required): ``num_query_heads % num_kv_heads == 0``.
+        qkv_bias (bool, optional, default=False).
+        dropout (float, optional, default=0.1).
+        device (optional, default='cpu').
+        dtype (optional, default=torch.float32).
+
+    Rules:
+        RoPE requires even head dimension.
+
+    Forward args:
+        x (torch.Tensor): ``(B, T, C)``.
+        mask (bool, optional, default=True).
+
+    Returns:
+        torch.Tensor: ``(B, T, C)``.
+    """
     def __init__(self, embed_dim, num_query_heads, num_kv_heads, qkv_bias=False, dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
         assert embed_dim % num_query_heads == 0, "embed_dim must be divisible by num_query_heads"
@@ -634,6 +846,24 @@ class Group_query_Attention_With_RoPE(nn.Module):
         return self.out_proj(out)
 
 class Local_Attention(nn.Module):
+    """Sliding-window causal self-attention.
+
+    Constructor args:
+        embed_dim (int, required).
+        num_heads (int, required): Rule ``embed_dim % num_heads == 0``.
+        window_size (int, required): Rule ``window_size >= 1``.
+        qkv_bias (bool, optional, default=False).
+        dropout (float, optional, default=0.1).
+        device (optional, default='cpu').
+        dtype (optional, default=torch.float32).
+
+    Forward args:
+        x (torch.Tensor): ``(B, T, C)``.
+        mask (bool, optional, default=True): Apply local causal mask.
+
+    Returns:
+        torch.Tensor: ``(B, T, C)``.
+    """
     def __init__(self, embed_dim, num_heads, window_size, qkv_bias=False,dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
 
@@ -702,6 +932,27 @@ class Local_Attention(nn.Module):
         return self.out_proj(out)
 
 class kv_cache_multihead(nn.Module):
+    """MHA with persistent KV cache for incremental decoding.
+
+    Constructor args:
+        embed_dim (int, required).
+        num_heads (int, required): ``embed_dim % num_heads == 0``.
+        batch_size (int, required): Preallocated cache batch capacity.
+        kv_seq_len (int, required): Maximum cache sequence length reference.
+        qkv_bias (bool, optional, default=False).
+        dropout (float, optional, default=0.1).
+        device (optional, default='cpu').
+        dtype (optional, default=torch.float32).
+
+    Forward args:
+        x (torch.Tensor): ``(B, T, C)`` token chunk.
+        start_pos (int, required): Write offset in cache.
+        mask (bool, optional, default=True): Causal masking over cache span.
+        rope (bool, optional, default=True): Enable RoPE before cache write.
+
+    Returns:
+        torch.Tensor: ``(B, T, C)``.
+    """
     def __init__(self, embed_dim, num_heads, batch_size, kv_seq_len, qkv_bias=False, dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
@@ -809,6 +1060,28 @@ class kv_cache_multihead(nn.Module):
         return self.out_proj(out)
 
 class kv_cache_group_query(nn.Module):  
+    """GQA with KV cache for production-grade decoding throughput.
+
+    Constructor args:
+        embed_dim (int, required).
+        num_query_heads (int, required): ``embed_dim % num_query_heads == 0``.
+        num_kv_heads (int, required): ``num_query_heads % num_kv_heads == 0``.
+        kv_seq_len (int, required): Maximum cache length reference.
+        batch_size (int, required): Cache batch capacity.
+        qkv_bias (bool, optional, default=False).
+        dropout (float, optional, default=0.1).
+        device (optional, default='cpu').
+        dtype (optional, default=torch.float32).
+
+    Forward args:
+        x (torch.Tensor): ``(B, T, C)``.
+        start_pos (int, required): Cache write position.
+        mask (bool, optional, default=True).
+        rope (bool, optional, default=True).
+
+    Returns:
+        torch.Tensor: ``(B, T, C)``.
+    """
     def __init__(self, embed_dim, num_query_heads, num_kv_heads, kv_seq_len, batch_size, qkv_bias=False, dropout=0.1, device='cpu', dtype=torch.float32):
         super().__init__()
         assert embed_dim % num_query_heads == 0, "embed_dim must be divisible by num_query_heads"
