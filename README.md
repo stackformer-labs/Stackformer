@@ -35,7 +35,9 @@ Stackformer/
 │   │   ├── Attention.py
 │   │   ├── Feed_forward.py
 │   │   ├── Normalization.py
-│   │   └── position_embedding.py
+│   │   ├── position_embedding.py
+│   │   └── Masking.py
+│   │   
 │   ├── models/
 │   │   ├── OpenAI.py
 │   │   ├── Meta.py
@@ -58,6 +60,7 @@ Stackformer/
 - Feed-forward blocks (`FF_ReLU`, `FF_GELU`, `FF_SwiGLU`, and more)
 - Normalization layers (`LayerNormalization`, `RMSNormalization`)
 - Positional embeddings (absolute, sinusoidal, RoPE)
+- Flexible masking (causal, sliding-window, global, dilated, random, and hybrid).
 
 ### 2) Model implementations
 - **OpenAI-style**: GPT family (`GPT_1`, `GPT_2`)
@@ -107,6 +110,19 @@ conda activate stackformer
 pip install stackformer
 ```
 
+### F) Install from Source (GitHub)
+```bash
+# Clone the repository
+git clone https://github.com/your-username/stackformer.git
+cd stackformer
+
+# (Optional) create environment
+conda create -n stackformer python=3.10 -y
+conda activate stackformer
+
+# Install in editable mode
+pip install -e .
+```
 ---
 
 ## Getting started
@@ -138,12 +154,12 @@ from stackformer.modules.Attention import Multi_Head_Attention
 from stackformer.modules.Feed_forward import FF_GELU
 
 x = torch.randn(2, 16, 64)
-attn = Multi_Head_Attention(embed_dim=64, num_heads=4, dropout=0.1)
+attn = Multi_Head_Attention(embed_dim=64, num_heads=4, dropout=0.1, mask_type=["causal", "dilated_causal"], dilation=2)
 ff = FF_GELU(embed_dim=64, hidden_dim=128, dropout=0.1)
 
 h = attn(x)
 out = ff(h)
-print(out.shape)
+print(out.shape)  # torch.Size([2, 16, 64])
 ```
 
 ### 3) Trainer usage (minimal workflow)
@@ -217,7 +233,6 @@ print(y.shape)
 - **Issues (bugs/feature requests):** https://github.com/Gurumurthy30/Stackformer/issues
 - **Discussions (Q&A, ideas):** https://github.com/Gurumurthy30/Stackformer/discussions
 - **Releases:** https://github.com/Gurumurthy30/Stackformer/releases
-- **Maintainer GitHub:** https://github.com/Gurumurthy30
 
 If you are using Stackformer in industry or research, open a discussion and share feedback—use-cases help shape the roadmap.
 
