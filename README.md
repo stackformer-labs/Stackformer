@@ -1,12 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="Stackformer logo" width="760" />
-</p>
-
-<p align="center">
-
-| ![image](https://img.shields.io/badge/-Tests:-black?style=flat-square) [![image](https://github.com/pytorch/ignite/actions/workflows/unit-tests.yml/badge.svg?branch=master)](https://github.com/pytorch/ignite/actions/workflows/unit-tests.yml) [![image](https://github.com/pytorch/ignite/actions/workflows/gpu-tests.yml/badge.svg)](https://github.com/pytorch/ignite/actions/workflows/gpu-tests.yml) [![image](https://codecov.io/gh/pytorch/ignite/branch/master/graph/badge.svg)](https://codecov.io/gh/pytorch/ignite) [![image](https://img.shields.io/badge/dynamic/json.svg?label=docs&url=https%3A%2F%2Fpypi.org%2Fpypi%2Fpytorch-ignite%2Fjson&query=%24.info.version&colorB=brightgreen&prefix=v)](https://pytorch.org/ignite/index.html) |
-|:---|
-
+  <img src="assets/logo.png" alt="Stackformer logo" width="560" />
 </p>
 
 # Stackformer
