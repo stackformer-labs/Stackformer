@@ -1,3 +1,16 @@
+"""Google-family decoder-only model implementations.
+
+This module includes two Gemma-style causal language models:
+- ``gemma_1_2b`` (Multi-Query Attention variant)
+- ``gemma_1_7b`` (Multi-Head Attention variant)
+
+Each model section contains an industrial/research-oriented class docstring with:
+- architecture details,
+- practical notes,
+- simple usage example,
+- placeholder to add the official paper/report link.
+"""
+
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -51,6 +64,43 @@ class gemma_1_2b_Decoder(nn.Module):
         return x
 
 class gemma_1_2b(nn.Module):
+    """Gemma 1 2B-style decoder-only causal language model.
+
+    Simple explanation:
+        This class builds a GPT-like text generation model that predicts the next
+        token from left to right (causal decoding). It uses a stack of decoder
+        blocks with pre-normalization, then projects hidden states to vocabulary
+        logits.
+
+    Architecture details:
+        - Attention: Multi-Query Attention (MQA) with RoPE.
+        - Masking: Causal mask (future tokens are hidden).
+        - Position encoding: RoPE (Rotary Positional Embedding).
+        - Feed-forward: GeGLU.
+        - Normalization: Pre-norm RMSNorm in blocks + final RMSNorm.
+
+    Research context:
+        - Family: Gemma-style decoder language models.
+        - Why used: efficient autoregressive generation with strong scaling
+          behavior in modern transformer stacks.
+        - Paper/report: TODO (add link manually).
+
+    Example:
+        >>> import torch
+        >>> from stackformer.models.Google import gemma_1_2b
+        >>> model = gemma_1_2b(
+        ...     vocab_size=32000,
+        ...     num_layers=4,
+        ...     embed_dim=512,
+        ...     num_heads=8,
+        ...     seq_len=128,
+        ...     dropout=0.1,
+        ...     hidden_dim=2048,
+        ... )
+        >>> input_ids = torch.randint(0, 32000, (2, 64))
+        >>> logits = model(input_ids)  # (batch=2, seq=64, vocab=32000)
+        >>> generated = model.generate(input_ids, max_new_tokens=16)
+    """
     def __init__(self, vocab_size, num_layers, embed_dim, num_heads, seq_len,
             dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
@@ -127,6 +177,42 @@ class gemma_1_7b_Decoder(nn.Module):
         return x
 
 class gemma_1_7b(nn.Module):
+    """Gemma 1 7B-style decoder-only causal language model.
+
+    Simple explanation:
+        This is a larger Gemma-style text model that generates text token by
+        token. It is very similar to ``gemma_1_2b`` but uses full multi-head
+        self-attention in each decoder block.
+
+    Architecture details:
+        - Attention: Multi-Head Attention (MHA) with RoPE.
+        - Masking: Causal mask.
+        - Position encoding: RoPE.
+        - Feed-forward: GeGLU.
+        - Normalization: Pre-norm RMSNorm in blocks + final RMSNorm.
+
+    Research context:
+        - Family: Gemma-style decoder language models.
+        - Tradeoff: higher modeling capacity than smaller variants at increased
+          memory/compute cost.
+        - Paper/report: TODO (add link manually).
+
+    Example:
+        >>> import torch
+        >>> from stackformer.models.Google import gemma_1_7b
+        >>> model = gemma_1_7b(
+        ...     vocab_size=32000,
+        ...     num_layers=6,
+        ...     embed_dim=768,
+        ...     num_heads=12,
+        ...     seq_len=128,
+        ...     dropout=0.1,
+        ...     hidden_dim=3072,
+        ... )
+        >>> input_ids = torch.randint(0, 32000, (1, 32))
+        >>> logits = model(input_ids)
+        >>> generated = model.generate(input_ids, max_new_tokens=20)
+    """
     def __init__(self, vocab_size, num_layers, embed_dim, num_heads, seq_len,
             dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()

@@ -1,3 +1,9 @@
+"""Meta-family decoder-only model implementations.
+
+This module provides LLaMA-style causal language models with research-oriented,
+yet easy-to-read documentation and usage examples.
+"""
+
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -51,6 +57,41 @@ class llama_1_Decoder(nn.Module):
         return x
 
 class llama_1(nn.Module):
+    """LLaMA 1-style decoder-only causal language model.
+
+    Simple explanation:
+        This model reads token sequences and predicts the next token using only
+        left context (causal decoding). It is designed for autoregressive text
+        generation.
+
+    Architecture details:
+        - Attention: Multi-Head Attention (MHA) with RoPE.
+        - Masking: Causal mask.
+        - Position encoding: RoPE.
+        - Feed-forward: SwiGLU.
+        - Normalization: Pre-norm RMSNorm in blocks + final RMSNorm.
+
+    Research context:
+        - Family: LLaMA 1 generation of decoder transformer models.
+        - Typical use: efficient high-quality language modeling and generation.
+        - Paper/report: TODO (add link manually).
+
+    Example:
+        >>> import torch
+        >>> from stackformer.models.Meta import llama_1
+        >>> model = llama_1(
+        ...     vocab_size=32000,
+        ...     num_layers=4,
+        ...     embed_dim=512,
+        ...     num_heads=8,
+        ...     seq_len=128,
+        ...     dropout=0.1,
+        ...     hidden_dim=2048,
+        ... )
+        >>> input_ids = torch.randint(0, 32000, (2, 64))
+        >>> logits = model(input_ids)
+        >>> generated = model.generate(input_ids, max_new_tokens=32)
+    """
     def __init__(self, vocab_size, num_layers, embed_dim, num_heads, seq_len,
             dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
@@ -130,6 +171,43 @@ class llama_2_Decoder(nn.Module):
         return x
 
 class llama_2(nn.Module):
+    """LLaMA 2-style decoder-only causal language model with GQA + KV cache.
+
+    Simple explanation:
+        This model is an autoregressive decoder that supports grouped-query
+        attention and key/value caching. That makes generation faster in long
+        decoding loops because cached states are reused.
+
+    Architecture details:
+        - Attention: Grouped-Query Attention (GQA) with KV cache.
+        - Masking: Causal mask.
+        - Position encoding: RoPE (enabled in attention call).
+        - Feed-forward: SwiGLU.
+        - Normalization: Pre-norm RMSNorm in blocks + final RMSNorm.
+
+    Research context:
+        - Family: LLaMA 2 generation decoder transformers.
+        - Why important: GQA improves inference efficiency while preserving
+          quality compared with full MHA at similar scale.
+        - Paper/report: TODO (add link manually).
+
+    Example:
+        >>> import torch
+        >>> from stackformer.models.Meta import llama_2
+        >>> model = llama_2(
+        ...     num_layers=4,
+        ...     embed_dim=512,
+        ...     num_query_heads=8,
+        ...     num_kv_heads=2,
+        ...     batch_size=1,
+        ...     kv_seq_len=128,
+        ...     vocab_size=32000,
+        ...     hidden_dim=2048,
+        ... )
+        >>> input_ids = torch.randint(0, 32000, (1, 16))
+        >>> logits = model(input_ids, start_pos=0)
+        >>> generated = model.generate(input_ids, max_new_tokens=24)
+    """
     def __init__(self, num_layers, embed_dim, num_query_heads, num_kv_heads, batch_size, kv_seq_len, vocab_size,
                 hidden_dim, eps=1e-5, dropout=0.1, dtype=torch.float32, device='cpu'):
         super().__init__()
