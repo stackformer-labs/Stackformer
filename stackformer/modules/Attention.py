@@ -50,7 +50,7 @@ class Self_Attention(nn.Module):
 
     Constructor args:
         embed_dim (int, required): Input/hidden size ``C``.
-        dropout (float, optional, default=0.1): Dropout probability on attention
+        dropout (float, optional, default=0.0): Dropout probability on attention
             probabilities after softmax.
         qkv_bias (bool, optional, default=False): Enables bias terms in Q/K/V
             projection layers.
@@ -72,7 +72,7 @@ class Self_Attention(nn.Module):
         >>> x = torch.randn(4, 32, 64)
         >>> y = layer(x, mask=True)
     """
-    def __init__(self, embed_dim, dropout=0.1, mask_type=['causal'], qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, dropout=0.0, mask_type=['causal'], qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         self.embed_dim = embed_dim
         self.device = device
@@ -164,7 +164,7 @@ class Multi_Head_Attention(nn.Module):
         embed_dim (int, required): Model width ``C``.
         num_heads (int, required): Number of query heads ``H``.
             Rule: ``embed_dim % num_heads == 0`` (enforced).
-        dropout (float, optional, default=0.1): Dropout on attention probs.
+        dropout (float, optional, default=0.0): Dropout on attention probs.
         qkv_bias (bool, optional, default=False): Bias in Q/K/V projections.
         device (str or torch.device, optional, default='cpu').
         dtype (torch.dtype, optional, default=torch.float32).
@@ -183,7 +183,7 @@ class Multi_Head_Attention(nn.Module):
         >>> layer = Multi_Head_Attention(embed_dim=512, num_heads=8)
         >>> y = layer(torch.randn(2, 128, 512), mask=True)
     """
-    def __init__(self, embed_dim, num_heads, dropout=0.1, mask_type=['causal'],qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, num_heads, dropout=0.0, mask_type=['causal'],qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
 
@@ -281,7 +281,7 @@ class Multi_Head_Attention_With_RoPE(nn.Module):
             Rules:
             - ``embed_dim % num_heads == 0``
             - ``head_dim`` must be even for RoPE pair-rotation.
-        dropout (float, optional, default=0.1).
+        dropout (float, optional, default=0.0).
         qkv_bias (bool, optional, default=False).
         device (optional, default='cpu').
         dtype (optional, default=torch.float32).
@@ -293,7 +293,7 @@ class Multi_Head_Attention_With_RoPE(nn.Module):
     Returns:
         torch.Tensor: ``(B, T, C)``.
     """
-    def __init__(self, embed_dim, num_heads, mask_type=['causal'], dropout=0.1,  qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, num_heads, mask_type=['causal'], dropout=0.0,  qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
 
@@ -412,7 +412,7 @@ class Cross_MultiHead_Attention(nn.Module):
     Constructor args:
         embed_dim (int, required).
         num_heads (int, required): ``embed_dim % num_heads == 0``.
-        dropout (float, optional, default=0.1).
+        dropout (float, optional, default=0.0).
         qkv_bias (bool, optional, default=False).
         device (optional, default='cpu').
         dtype (optional, default=torch.float32).
@@ -426,7 +426,7 @@ class Cross_MultiHead_Attention(nn.Module):
     Returns:
         torch.Tensor: ``(B, T, C)``.
     """
-    def __init__(self, embed_dim, num_heads, mask_type=['causal'],dropout=0.1, qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, num_heads, mask_type=['causal'],dropout=0.0, qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
 
@@ -522,7 +522,7 @@ class Multi_query_Attention(nn.Module):
         embed_dim (int, required).
         num_heads (int, required): Number of query heads. Rule:
             ``embed_dim % num_heads == 0``.
-        dropout (float, optional, default=0.1).
+        dropout (float, optional, default=0.0).
         qkv_bias (bool, optional, default=False).
         device (optional, default='cpu').
         dtype (optional, default=torch.float32).
@@ -534,7 +534,7 @@ class Multi_query_Attention(nn.Module):
     Returns:
         torch.Tensor: ``(B, T, C)``.
     """
-    def __init__(self, embed_dim, num_heads, mask_type=['causal'], dropout=0.1, qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, num_heads, mask_type=['causal'], dropout=0.0, qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
 
@@ -628,7 +628,7 @@ class Multi_query_Attention_With_RoPE(nn.Module):
         embed_dim (int, required).
         num_heads (int, required): ``embed_dim % num_heads == 0`` and even
             ``head_dim`` for RoPE.
-        dropout (float, optional, default=0.1).
+        dropout (float, optional, default=0.0).
         qkv_bias (bool, optional, default=False).
         device (optional, default='cpu').
         dtype (optional, default=torch.float32).
@@ -640,7 +640,7 @@ class Multi_query_Attention_With_RoPE(nn.Module):
     Returns:
         torch.Tensor: ``(B, T, C)``.
     """
-    def __init__(self, embed_dim, num_heads, mask_type=['causal'],dropout=0.1, qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, num_heads, mask_type=['causal'],dropout=0.0, qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
 
@@ -763,7 +763,7 @@ class Group_query_Attention(nn.Module):
         num_query_heads (int, required): Rule ``embed_dim % num_query_heads == 0``.
         num_kv_heads (int, required): Rule ``num_query_heads % num_kv_heads == 0``.
         qkv_bias (bool, optional, default=False).
-        dropout (float, optional, default=0.1).
+        dropout (float, optional, default=0.0).
         device (optional, default='cpu').
         dtype (optional, default=torch.float32).
 
@@ -774,7 +774,7 @@ class Group_query_Attention(nn.Module):
     Returns:
         torch.Tensor: ``(B, T, C)``.
     """
-    def __init__(self, embed_dim, num_query_heads, num_kv_heads, qkv_bias=False, mask_type=['causal'],dropout=0.1, device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, num_query_heads, num_kv_heads, qkv_bias=False, mask_type=['causal'],dropout=0.0, device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         assert embed_dim % num_query_heads == 0, "embed_dim must be divisible by num_query_heads"
         assert num_query_heads % num_kv_heads == 0, "num_query_heads must be divisible by num_kv_heads"
@@ -872,7 +872,7 @@ class Group_query_Attention_With_RoPE(nn.Module):
         num_query_heads (int, required): ``embed_dim % num_query_heads == 0``.
         num_kv_heads (int, required): ``num_query_heads % num_kv_heads == 0``.
         qkv_bias (bool, optional, default=False).
-        dropout (float, optional, default=0.1).
+        dropout (float, optional, default=0.0).
         device (optional, default='cpu').
         dtype (optional, default=torch.float32).
 
@@ -886,7 +886,7 @@ class Group_query_Attention_With_RoPE(nn.Module):
     Returns:
         torch.Tensor: ``(B, T, C)``.
     """
-    def __init__(self, embed_dim, num_query_heads, num_kv_heads, qkv_bias=False, mask_type=['causal'], dropout=0.1, device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, num_query_heads, num_kv_heads, qkv_bias=False, mask_type=['causal'], dropout=0.0, device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         assert embed_dim % num_query_heads == 0, "embed_dim must be divisible by num_query_heads"
         assert num_query_heads % num_kv_heads == 0, "num_query_heads must be divisible by num_kv_heads"
@@ -1012,7 +1012,7 @@ class Local_Attention(nn.Module):
         num_heads (int, required): Rule ``embed_dim % num_heads == 0``.
         window_size (int, required): Rule ``window_size >= 1``.
         qkv_bias (bool, optional, default=False).
-        dropout (float, optional, default=0.1).
+        dropout (float, optional, default=0.0).
         device (optional, default='cpu').
         dtype (optional, default=torch.float32).
 
@@ -1023,7 +1023,7 @@ class Local_Attention(nn.Module):
     Returns:
         torch.Tensor: ``(B, T, C)``.
     """
-    def __init__(self, embed_dim, num_heads, window_size, mask_type=['sliding_window'], qkv_bias=False,dropout=0.1, device='cpu', dtype=torch.float32):
+    def __init__(self, embed_dim, num_heads, window_size, mask_type=['sliding_window'], qkv_bias=False,dropout=0.0, device='cpu', dtype=torch.float32):
         super().__init__()
 
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
@@ -1104,7 +1104,7 @@ class kv_cache_multihead(nn.Module):
         batch_size (int, required): Preallocated cache batch capacity.
         kv_seq_len (int, required): Maximum cache sequence length reference.
         qkv_bias (bool, optional, default=False).
-        dropout (float, optional, default=0.1).
+        dropout (float, optional, default=0.0).
         device (optional, default='cpu').
         dtype (optional, default=torch.float32).
 
@@ -1117,7 +1117,7 @@ class kv_cache_multihead(nn.Module):
     Returns:
         torch.Tensor: ``(B, T, C)``.
     """
-    def __init__(self, embed_dim, num_heads, batch_size, kv_seq_len, mask_type=['causal'], qkv_bias=False, dropout=0.1, device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, num_heads, batch_size, kv_seq_len, mask_type=['causal'], qkv_bias=False, dropout=0.0, device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
 
@@ -1250,7 +1250,7 @@ class kv_cache_group_query(nn.Module):
         kv_seq_len (int, required): Maximum cache length reference.
         batch_size (int, required): Cache batch capacity.
         qkv_bias (bool, optional, default=False).
-        dropout (float, optional, default=0.1).
+        dropout (float, optional, default=0.0).
         device (optional, default='cpu').
         dtype (optional, default=torch.float32).
 
@@ -1263,7 +1263,7 @@ class kv_cache_group_query(nn.Module):
     Returns:
         torch.Tensor: ``(B, T, C)``.
     """
-    def __init__(self, embed_dim, num_query_heads, num_kv_heads, kv_seq_len, batch_size, mask_type=['causal'], qkv_bias=False, dropout=0.1, device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, num_query_heads, num_kv_heads, kv_seq_len, batch_size, mask_type=['causal'], qkv_bias=False, dropout=0.0, device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         assert embed_dim % num_query_heads == 0, "embed_dim must be divisible by num_query_heads"
         assert num_query_heads % num_kv_heads == 0, "num_query_heads must be divisible by num_kv_heads"
