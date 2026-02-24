@@ -98,7 +98,20 @@ class Self_Attention(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_mask(self, seq_len: int):
-        key = (seq_len, self.mask_type)
+        # Handle boolean mask coming from forward(mask=True)
+        if self.mask_type is True:
+            mask_types = ["causal"]
+        elif self.mask_type in (False, None):
+            return None
+        elif isinstance(self.mask_type, str):
+            mask_types = [self.mask_type]
+        elif isinstance(self.mask_type, (list, tuple)):
+            mask_types = list(self.mask_type)
+        else:
+            raise TypeError("mask_type must be bool, str, or list of str")
+        
+        # Hashable cache key
+        key = (seq_len, tuple(mask_types))
 
         if key not in self._causal_mask_cache:
             mask = make_mask(
@@ -198,7 +211,20 @@ class Multi_Head_Attention(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_mask(self, seq_len: int):
-        key = (seq_len, self.mask_type)
+        # Handle boolean mask coming from forward(mask=True)
+        if self.mask_type is True:
+            mask_types = ["causal"]
+        elif self.mask_type in (False, None):
+            return None
+        elif isinstance(self.mask_type, str):
+            mask_types = [self.mask_type]
+        elif isinstance(self.mask_type, (list, tuple)):
+            mask_types = list(self.mask_type)
+        else:
+            raise TypeError("mask_type must be bool, str, or list of str")
+        
+        # Hashable cache key
+        key = (seq_len, tuple(mask_types))
 
         if key not in self._causal_mask_cache:
             mask = make_mask(
@@ -295,7 +321,20 @@ class Multi_Head_Attention_With_RoPE(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_mask(self, seq_len: int):
-        key = (seq_len, self.mask_type)
+        # Handle boolean mask coming from forward(mask=True)
+        if self.mask_type is True:
+            mask_types = ["causal"]
+        elif self.mask_type in (False, None):
+            return None
+        elif isinstance(self.mask_type, str):
+            mask_types = [self.mask_type]
+        elif isinstance(self.mask_type, (list, tuple)):
+            mask_types = list(self.mask_type)
+        else:
+            raise TypeError("mask_type must be bool, str, or list of str")
+        
+        # Hashable cache key
+        key = (seq_len, tuple(mask_types))
 
         if key not in self._causal_mask_cache:
             mask = make_mask(
@@ -415,7 +454,20 @@ class Cross_MultiHead_Attention(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_mask(self, seq_len: int):
-        key = (seq_len, self.mask_type)
+        # Handle boolean mask coming from forward(mask=True)
+        if self.mask_type is True:
+            mask_types = ["causal"]
+        elif self.mask_type in (False, None):
+            return None
+        elif isinstance(self.mask_type, str):
+            mask_types = [self.mask_type]
+        elif isinstance(self.mask_type, (list, tuple)):
+            mask_types = list(self.mask_type)
+        else:
+            raise TypeError("mask_type must be bool, str, or list of str")
+        
+        # Hashable cache key
+        key = (seq_len, tuple(mask_types))
 
         if key not in self._causal_mask_cache:
             mask = make_mask(
@@ -510,7 +562,20 @@ class Multi_query_Attention(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_mask(self, seq_len: int):
-        key = (seq_len, self.mask_type)
+        # Handle boolean mask coming from forward(mask=True)
+        if self.mask_type is True:
+            mask_types = ["causal"]
+        elif self.mask_type in (False, None):
+            return None
+        elif isinstance(self.mask_type, str):
+            mask_types = [self.mask_type]
+        elif isinstance(self.mask_type, (list, tuple)):
+            mask_types = list(self.mask_type)
+        else:
+            raise TypeError("mask_type must be bool, str, or list of str")
+        
+        # Hashable cache key
+        key = (seq_len, tuple(mask_types))
 
         if key not in self._causal_mask_cache:
             mask = make_mask(
@@ -603,7 +668,20 @@ class Multi_query_Attention_With_RoPE(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_mask(self, seq_len: int):
-        key = (seq_len, self.mask_type)
+        # Handle boolean mask coming from forward(mask=True)
+        if self.mask_type is True:
+            mask_types = ["causal"]
+        elif self.mask_type in (False, None):
+            return None
+        elif isinstance(self.mask_type, str):
+            mask_types = [self.mask_type]
+        elif isinstance(self.mask_type, (list, tuple)):
+            mask_types = list(self.mask_type)
+        else:
+            raise TypeError("mask_type must be bool, str, or list of str")
+        
+        # Hashable cache key
+        key = (seq_len, tuple(mask_types))
 
         if key not in self._causal_mask_cache:
             mask = make_mask(
@@ -726,7 +804,20 @@ class Group_query_Attention(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_mask(self, seq_len: int):
-        key = (seq_len, self.mask_type)
+        # Handle boolean mask coming from forward(mask=True)
+        if self.mask_type is True:
+            mask_types = ["causal"]
+        elif self.mask_type in (False, None):
+            return None
+        elif isinstance(self.mask_type, str):
+            mask_types = [self.mask_type]
+        elif isinstance(self.mask_type, (list, tuple)):
+            mask_types = list(self.mask_type)
+        else:
+            raise TypeError("mask_type must be bool, str, or list of str")
+        
+        # Hashable cache key
+        key = (seq_len, tuple(mask_types))
 
         if key not in self._causal_mask_cache:
             mask = make_mask(
@@ -825,7 +916,20 @@ class Group_query_Attention_With_RoPE(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_mask(self, seq_len: int):
-        key = (seq_len, self.mask_type)
+        # Handle boolean mask coming from forward(mask=True)
+        if self.mask_type is True:
+            mask_types = ["causal"]
+        elif self.mask_type in (False, None):
+            return None
+        elif isinstance(self.mask_type, str):
+            mask_types = [self.mask_type]
+        elif isinstance(self.mask_type, (list, tuple)):
+            mask_types = list(self.mask_type)
+        else:
+            raise TypeError("mask_type must be bool, str, or list of str")
+        
+        # Hashable cache key
+        key = (seq_len, tuple(mask_types))
 
         if key not in self._causal_mask_cache:
             mask = make_mask(
