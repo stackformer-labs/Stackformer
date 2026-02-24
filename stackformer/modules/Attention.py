@@ -98,7 +98,7 @@ class Self_Attention(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_mask(self, seq_len: int):
-        key = (seq_len, tuple(self.mask_type))
+        key = (seq_len, self.mask_type)
 
         if key not in self._causal_mask_cache:
             mask = make_mask(
@@ -198,7 +198,7 @@ class Multi_Head_Attention(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_mask(self, seq_len: int):
-        key = (seq_len, tuple(self.mask_type))
+        key = (seq_len, self.mask_type)
 
         if key not in self._causal_mask_cache:
             mask = make_mask(
@@ -226,6 +226,7 @@ class Multi_Head_Attention(nn.Module):
         k = k.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
         
+        causal_mask = None
         # Apply causal mask if needed
         if mask:
             causal_mask = self._get_or_create_mask(T)  # (T, T)
@@ -294,7 +295,7 @@ class Multi_Head_Attention_With_RoPE(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_mask(self, seq_len: int):
-        key = (seq_len, tuple(self.mask_type))
+        key = (seq_len, self.mask_type)
 
         if key not in self._causal_mask_cache:
             mask = make_mask(
@@ -349,6 +350,7 @@ class Multi_Head_Attention_With_RoPE(nn.Module):
         q = self._apply_rotary_position_embedding(q, freq)
         k = self._apply_rotary_position_embedding(k, freq)
         
+        causal_mask = None
         # Apply causal mask if needed
         if mask:
             causal_mask = self._get_or_create_mask(T)  # (T, T)
@@ -413,7 +415,7 @@ class Cross_MultiHead_Attention(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_mask(self, seq_len: int):
-        key = (seq_len, tuple(self.mask_type))
+        key = (seq_len, self.mask_type)
 
         if key not in self._causal_mask_cache:
             mask = make_mask(
@@ -444,6 +446,7 @@ class Cross_MultiHead_Attention(nn.Module):
         k = k.view(B, S, self.num_heads, self.head_dim).transpose(1, 2)  # (B, num_heads, S, head_dim)
         v = v.view(B, S, self.num_heads, self.head_dim).transpose(1, 2)  # (B, num_heads, S, head_dim)
 
+        causal_mask = None
         # Apply causal mask if needed
         if mask:
             causal_mask = self._get_or_create_mask(T)  # (T, T)
@@ -507,7 +510,7 @@ class Multi_query_Attention(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_mask(self, seq_len: int):
-        key = (seq_len, tuple(self.mask_type))
+        key = (seq_len, self.mask_type)
 
         if key not in self._causal_mask_cache:
             mask = make_mask(
@@ -537,6 +540,7 @@ class Multi_query_Attention(nn.Module):
         k = k.unsqueeze(1).expand(B, self.num_heads, T, self.head_dim)
         v = v.unsqueeze(1).expand(B, self.num_heads, T, self.head_dim)
         
+        causal_mask = None
         # Apply causal mask if needed
         if mask:
             causal_mask = self._get_or_create_mask(T)  # (T, T)
@@ -599,7 +603,7 @@ class Multi_query_Attention_With_RoPE(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_mask(self, seq_len: int):
-        key = (seq_len, tuple(self.mask_type))
+        key = (seq_len, self.mask_type)
 
         if key not in self._causal_mask_cache:
             mask = make_mask(
@@ -657,6 +661,7 @@ class Multi_query_Attention_With_RoPE(nn.Module):
         q = self._apply_rotary_position_embedding(q, freq)
         k = self._apply_rotary_position_embedding(k, freq)
         
+        causal_mask = None
         # Apply causal mask if needed
         if mask:
             causal_mask = self._get_or_create_mask(T)  # (T, T)
@@ -721,7 +726,7 @@ class Group_query_Attention(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_mask(self, seq_len: int):
-        key = (seq_len, tuple(self.mask_type))
+        key = (seq_len, self.mask_type)
 
         if key not in self._causal_mask_cache:
             mask = make_mask(
@@ -752,6 +757,7 @@ class Group_query_Attention(nn.Module):
         k = k.repeat_interleave(self.num_queries_per_kv, dim=1)  # (B, num_query_heads, T, head_dim)
         v = v.repeat_interleave(self.num_queries_per_kv, dim=1)
 
+        causal_mask = None
         # Apply causal mask if needed
         if mask:
             causal_mask = self._get_or_create_mask(T)  # (T, T)
@@ -819,7 +825,7 @@ class Group_query_Attention_With_RoPE(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_mask(self, seq_len: int):
-        key = (seq_len, tuple(self.mask_type))
+        key = (seq_len, self.mask_type)
 
         if key not in self._causal_mask_cache:
             mask = make_mask(
@@ -878,6 +884,7 @@ class Group_query_Attention_With_RoPE(nn.Module):
         q = self._apply_rotary_position_embedding(q, freq)
         k = self._apply_rotary_position_embedding(k, freq)
         
+        causal_mask = None
         # Apply causal mask if needed
         if mask:
             causal_mask = self._get_or_create_mask(T)  # (T, T)
@@ -968,9 +975,10 @@ class Local_Attention(nn.Module):
         k = k.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
         
+        causal_mask = None
         # Apply causal mask if needed
         if mask:
-            causal_mask = self._get_or_create_mask(T,window_size=self.window_size)  # (T, T)
+            causal_mask = self._get_or_create_mask(T, window_size=self.window_size)  # (T, T)
 
         out = F.scaled_dot_product_attention(
             q, k, v,
