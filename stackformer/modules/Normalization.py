@@ -1,49 +1,49 @@
-"""
-Normalization Layers for StackFormer Library
+"""Normalization layers for Stackformer blocks.
 
-This module provides essential normalization techniques commonly used in transformer 
-and deep learning architectures to stabilize and accelerate training. It includes:
+This module provides two per-token normalization operators used in transformer
+architectures:
+- LayerNormalization (mean+variance normalization with affine scale/bias)
+- RMSNormalization (root-mean-square normalization with scale only)
 
-1. Layer Normalization (LayerNorm)
-    - Normalizes across the feature dimension for each token independently.
-    - Helps reduce internal covariate shift in deep networks.
+Given ``x`` with last dimension ``C``:
+- LayerNorm: ``y = gamma * (x - mean(x)) / sqrt(var(x) + eps) + beta``
+- RMSNorm:   ``y = gamma * x / (sqrt(mean(x^2)) + eps)``
 
-2. Root Mean Square Layer Normalization (RMSNorm)
-    - Scales inputs based on their root mean square value without subtracting the mean.
-    - Offers a computationally efficient and often more stable alternative to LayerNorm.
-
-Both implementations are written in PyTorch and are designed for modular integration 
-into custom transformer-based models.
+Notation:
+- ``B``: batch size
+- ``T``: sequence length
+- ``C``: embedding dimension (normalized dimension)
 """
 
 import torch
 import torch.nn as nn
 
 class LayerNormalization(nn.Module):
-    """
-    Applies standard Layer Normalization over the last dimension of the input tensor.
+    """Layer normalization over the last tensor dimension.
 
-    Formula:
-        Input: x of shape (batch_size, seq_length, embedding_dim)
-        - Compute mean along the last dimension: mean = average(x)
-        - Compute variance along the last dimension: var = average((x - mean)²)
-        - Normalize: normalized_x = (x - mean) / sqrt(var + epsilon)
-        - Scale and shift: output = gamma * normalized_x + beta
+    Constructor args:
+        embed_dim (int, required): Normalized feature size ``C``.
+        eps (float, optional, default=1e-5): Numerical stability constant.
+        device (str or torch.device, optional, default='cpu').
+        dtype (torch.dtype, optional, default=torch.float32).
 
-    Args:
-        embed_dim (int): Size of the last dimension (embedding dimension)
-        eps (float): Small constant added to avoid division by zero
+    Learnable parameters:
+        weight (gamma): Shape ``(C,)``.
+        bias (beta): Shape ``(C,)``.
 
-    Forward Args:
-        x (Tensor): Input tensor of shape (batch_size, seq_length, embed_dim)
+    Forward args:
+        x (torch.Tensor): Shape ``(..., C)``.
 
     Returns:
-        Tensor: Output tensor of the same shape as input
+        torch.Tensor: Same shape as input ``(..., C)``.
 
     Example:
-        >>> layer_norm = LayerNormalization(embed_dim=64)
-        >>> x = torch.randn(4, 10, 64)
-        >>> output = layer_norm(x)
+        >>> norm = LayerNormalization(embed_dim=256, eps=1e-5)
+        >>> x = torch.randn(4, 32, 256)
+        >>> y = norm(x)
+        >>> y.shape
+        torch.Size([4, 32, 256])
+    
     """
     def __init__(self, embed_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
@@ -61,29 +61,33 @@ class LayerNormalization(nn.Module):
         return output.to(device=self.device, dtype=self.dtype)
 
 class RMSNormalization(nn.Module):
-    """
-    Applies RMS Layer Normalization over the last dimension of the input tensor.
+    """RMSNorm over the last tensor dimension (no mean subtraction).
 
-    Formula:
-        Input: x of shape (batch_size, seq_length, embedding_dim)
-        - Compute root mean square: rms = sqrt(average(x²))
-        - Normalize: normalized_x = x / (rms + epsilon)
-        - Scale: output = gamma * normalized_x
+    Constructor args:
+        embed_dim (int, required): Feature size ``C``.
+        eps (float, optional, default=1e-5): Numerical stability constant.
+        device (str or torch.device, optional, default='cpu').
+        dtype (torch.dtype, optional, default=torch.float32).
 
-    Args:
-        embed_dim (int): Size of the last dimension (embedding dimension)
-        eps (float): Small constant added to avoid division by zero
+    Learnable parameters:
+        weight (gamma): Shape ``(C,)``.
 
-    Forward Args:
-        x (Tensor): Input tensor of shape (batch_size, seq_length, embed_dim)
+    Forward args:
+        x (torch.Tensor): Shape ``(..., C)``.
 
     Returns:
-        Tensor: Output tensor of the same shape as input
+        torch.Tensor: Same shape as input ``(..., C)``.
+
+    Practical note:
+        RMSNorm is often faster and slightly more stable for large language models.
 
     Example:
-        >>> rms_norm = RMSNormilization(embed_dim=64)
-        >>> x = torch.randn(4, 10, 64)
-        >>> output = rms_norm(x)
+        >>> norm = RMSNormalization(embed_dim=256)
+        >>> x = torch.randn(4, 32, 256)
+        >>> y = norm(x)
+        >>> y.shape
+        torch.Size([4, 32, 256])
+    
     """
     def __init__(self, embed_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
