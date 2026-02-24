@@ -1,3 +1,9 @@
+"""OpenAI GPT-family decoder-only model implementations.
+
+This module contains GPT-1 and GPT-2 style language models with concise,
+research-aware documentation and practical usage examples.
+"""
+
 import torch
 import torch.nn as nn
 
@@ -100,6 +106,41 @@ class GPT_1_Decoder(nn.Module):
 
 
 class GPT_1(nn.Module):
+    """GPT-1 style decoder-only causal language model.
+
+    Simple explanation:
+        GPT-1 is an early large-scale autoregressive transformer that predicts
+        the next token from previous tokens. This implementation follows the
+        same high-level decoder-only design.
+
+    Architecture details:
+        - Attention: Multi-Head self-attention.
+        - Masking: Causal mask.
+        - Position encoding: Learned absolute positional embeddings.
+        - Feed-forward: GELU MLP.
+        - Normalization: Post-LayerNorm style inside blocks, with final norm.
+
+    Research context:
+        - Historical role: established transfer learning with generative
+          pretraining for NLP tasks.
+        - Paper/report: TODO (add link manually).
+
+    Example:
+        >>> import torch
+        >>> from stackformer.models.OpenAI import GPT_1
+        >>> model = GPT_1(
+        ...     vocab_size=50257,
+        ...     num_layers=4,
+        ...     embed_dim=512,
+        ...     num_heads=8,
+        ...     seq_len=128,
+        ...     dropout=0.1,
+        ...     hidden_dim=2048,
+        ... )
+        >>> x = torch.randint(0, 50257, (2, 32))
+        >>> logits = model(x)
+        >>> out = model.generate(x, max_new_tokens=16)
+    """
     def __init__(
         self,
         vocab_size,
@@ -241,6 +282,40 @@ class GPT_2_Decoder(nn.Module):
 
 
 class GPT_2(nn.Module):
+    """GPT-2 style decoder-only causal language model.
+
+    Simple explanation:
+        GPT-2 scales decoder-only transformers and uses pre-normalization for
+        better optimization behavior in deeper stacks.
+
+    Architecture details:
+        - Attention: Multi-Head self-attention.
+        - Masking: Causal mask.
+        - Position encoding: Learned absolute positional embeddings.
+        - Feed-forward: GELU MLP.
+        - Normalization: Pre-LayerNorm in blocks + final LayerNorm.
+
+    Research context:
+        - Historical role: demonstrated strong zero/few-shot generation by
+          scaling model and data.
+        - Paper/report: TODO (add link manually).
+
+    Example:
+        >>> import torch
+        >>> from stackformer.models.OpenAI import GPT_2
+        >>> model = GPT_2(
+        ...     vocab_size=50257,
+        ...     num_layers=6,
+        ...     embed_dim=768,
+        ...     num_heads=12,
+        ...     seq_len=128,
+        ...     dropout=0.1,
+        ...     hidden_dim=3072,
+        ... )
+        >>> x = torch.randint(0, 50257, (1, 24))
+        >>> logits = model(x)
+        >>> out = model.generate(x, max_new_tokens=20)
+    """
     def __init__(
         self,
         vocab_size,
