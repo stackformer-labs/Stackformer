@@ -4,6 +4,14 @@ import torch.nn as nn
 from stackformer.modules.Attention import Multi_Head_Attention
 from stackformer.modules.Feed_forward import FF_ReLU
 
+"""Vision Transformer (ViT) building blocks.
+
+This file implements a classification-focused Vision Transformer based on the
+paper architecture introduced in 2020.
+
+Paper (add your link): [TODO: add paper link]
+"""
+
 # Patch Embedding
 class PatchEmbedding(nn.Module):
     def __init__(self, img_size=224, patch_size=16, emb_dim=768):
@@ -68,6 +76,53 @@ class Encoder(nn.Module):
 
 # Vision Transformer (ViT)
 class ViT(nn.Module):
+    """Vision Transformer for image classification.
+
+    Simple explanation:
+        ViT splits an image into fixed-size patches, projects each patch into an
+        embedding vector, and processes the patch sequence with transformer
+        encoder blocks. A learnable ``[CLS]`` token is prepended, and its final
+        representation is used for classification.
+
+    Architecture details (current implementation):
+        - Task: image classification
+        - Input tokenization: non-overlapping convolutional patch projection
+        - Attention: multi-head self-attention (full global attention)
+        - Masking: no causal mask (bidirectional attention over all patches)
+        - Positional encoding: learnable absolute positional embeddings
+        - Feed-forward block: ReLU-based FFN (``FF_ReLU``)
+        - Normalization: Pre-Norm LayerNorm inside each transformer block
+        - Head: LayerNorm + Linear classifier on ``[CLS]`` token
+
+    Historical context:
+        - Model family introduced by the paper "An Image is Worth 16x16 Words"
+          (Google Research, 2020; published at ICLR 2021).
+        - ViT showed that transformer-only backbones can match or exceed strong
+          CNN baselines when trained with sufficient data.
+
+    Paper reference:
+        - ViT paper: [TODO: add paper link]
+
+    Example:
+        >>> import torch
+        >>> from stackformer.vision import ViT
+        >>> model = ViT(img_size=224, patch_size=16, num_classes=1000)
+        >>> x = torch.randn(2, 3, 224, 224)
+        >>> logits = model(x)
+        >>> logits.shape
+        torch.Size([2, 1000])
+
+    Args:
+        img_size: Input image height/width (square expected).
+        patch_size: Patch size used for tokenization.
+        num_layers: Number of transformer encoder layers.
+        Emb_dim: Embedding dimension for patch tokens.
+        num_classes: Number of output classes.
+        num_heads: Number of attention heads.
+        dropout: Dropout probability.
+        hidden_dim: Hidden dimension of the feed-forward layer.
+        eps: Epsilon used by layer normalization.
+    """
     def __init__(self, img_size=224, patch_size=16, num_layers=12,
                  Emb_dim=768, num_classes=1000, num_heads=12,
                  dropout=0.1, hidden_dim=3072, eps=1e-5):

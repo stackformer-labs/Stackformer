@@ -3,6 +3,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 
+"""SegFormer-B0 implementation for semantic segmentation.
+
+This module contains a compact SegFormer-style encoder-decoder model with a
+multi-scale transformer encoder and a lightweight MLP decoder.
+
+Paper (add your link): [TODO: add paper link]
+"""
+
 # Patch embedding layer
 class patch(nn.Module):
     def __init__(self, img_size=224, in_channels=3, out_channels=768, kernel=7, stride=3, padding=3):
@@ -244,6 +252,49 @@ class MLP(nn.Module):
         return output
 
 class SegFormerB0(nn.Module):
+    """SegFormer-B0 style model for semantic segmentation.
+
+    Simple explanation:
+        SegFormer takes an input image and builds feature maps at multiple
+        scales (from high resolution to low resolution) using hierarchical
+        transformer stages. These features are fused by an MLP decoder to
+        produce per-pixel class predictions.
+
+    Architecture details (current implementation):
+        - Task: semantic segmentation
+        - Encoder type: hierarchical transformer with 4 stages
+        - Stage channels: [32, 64, 160, 256]
+        - Attention: efficient multi-head self-attention with sequence
+          reduction factors [8, 4, 2, 1] across stages
+        - Masking: no causal mask (full bidirectional self-attention)
+        - Positional strategy: implicit positional cues from overlapping patch
+          embeddings (no explicit absolute position embedding tensor)
+        - Feed-forward block: GELU MLP per transformer block
+        - Normalization: Pre-Norm LayerNorm in each transformer block
+        - Decoder: MLP feature projection + multi-scale fusion + bilinear
+          upsampling
+
+    Historical context:
+        - SegFormer was introduced by NVIDIA in 2021 as a simple and effective
+          transformer architecture for semantic segmentation.
+        - It avoids heavy decoder designs and explicit positional encodings
+          while keeping strong accuracy-speed trade-offs.
+
+    Paper reference:
+        - SegFormer paper: [TODO: add paper link]
+
+    Example:
+        >>> import torch
+        >>> from stackformer.vision import SegFormerB0
+        >>> model = SegFormerB0(num_classes=19)
+        >>> x = torch.randn(2, 3, 224, 224)
+        >>> y = model(x)
+        >>> y.shape
+        torch.Size([2, 19, 224, 224])
+
+    Args:
+        num_classes: Number of segmentation classes in the output map.
+    """
     def __init__(self, num_classes=150):
         super().__init__()
         self.encoder = Encoder()
