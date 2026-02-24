@@ -9,7 +9,7 @@ from stackformer.modules.Feed_forward import FF_ReLU
 This file implements a classification-focused Vision Transformer based on the
 paper architecture introduced in 2020.
 
-Paper (add your link): [TODO: add paper link]
+Paper reference: https://arxiv.org/abs/2010.11929
 """
 
 # Patch Embedding
@@ -101,7 +101,7 @@ class ViT(nn.Module):
           CNN baselines when trained with sufficient data.
 
     Paper reference:
-        - ViT paper: [TODO: add paper link]
+        - ViT paper: https://arxiv.org/abs/2010.11929
 
     Example:
         >>> import torch

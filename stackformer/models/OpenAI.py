@@ -123,7 +123,7 @@ class GPT_1(nn.Module):
     Research context:
         - Historical role: established transfer learning with generative
           pretraining for NLP tasks.
-        - Paper/report: TODO (add link manually).
+        - Paper/report: https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf?utm_source=chatgpt.com
 
     Example:
         >>> import torch
@@ -242,8 +242,7 @@ class GPT_2_Block(nn.Module):
         return x
 
 
-# ---------------- GPT-2 Decoder ----------------
-
+# --- GPT-2 Decoder ---
 class GPT_2_Decoder(nn.Module):
     def __init__(
         self,
@@ -298,7 +297,7 @@ class GPT_2(nn.Module):
     Research context:
         - Historical role: demonstrated strong zero/few-shot generation by
           scaling model and data.
-        - Paper/report: TODO (add link manually).
+        - Paper/report: https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf?utm_source=chatgpt.com
 
     Example:
         >>> import torch

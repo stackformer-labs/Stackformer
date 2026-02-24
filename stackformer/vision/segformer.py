@@ -8,7 +8,7 @@ import math
 This module contains a compact SegFormer-style encoder-decoder model with a
 multi-scale transformer encoder and a lightweight MLP decoder.
 
-Paper (add your link): [TODO: add paper link]
+Paper reference: https://arxiv.org/abs/2105.15203
 """
 
 # Patch embedding layer
@@ -281,7 +281,7 @@ class SegFormerB0(nn.Module):
           while keeping strong accuracy-speed trade-offs.
 
     Paper reference:
-        - SegFormer paper: [TODO: add paper link]
+        - SegFormer paper: https://arxiv.org/abs/2105.15203
 
     Example:
         >>> import torch

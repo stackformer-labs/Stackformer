@@ -13,14 +13,7 @@ from stackformer.modules.Feed_forward import FF_SwiGLU
 from stackformer.modules.Normalization import RMSNormalization
 from stackformer.generate import text_generate
 
-'''
-llama 1
-Attention: MHA
-Mask: Casual
-position: RoPE
-FF: SwiGLU
-Norm: pre norm (RMS norm)
-'''
+# --- llama 1 ---
 class llama_1_Block(nn.Module):
     def __init__(self, embed_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
@@ -74,7 +67,7 @@ class llama_1(nn.Module):
     Research context:
         - Family: LLaMA 1 generation of decoder transformer models.
         - Typical use: efficient high-quality language modeling and generation.
-        - Paper/report: TODO (add link manually).
+        - Paper/report: https://arxiv.org/abs/2302.13971
 
     Example:
         >>> import torch
@@ -124,14 +117,7 @@ class llama_1(nn.Module):
     def generate(self, prompt_ids, max_context_len=128, max_new_tokens=50, temperature=1.0, top_k=None, top_p=1.0, eos_token_id=None):
         return text_generate(self, prompt_ids, max_context_len, max_new_tokens, temperature, top_k, top_p, eos_token_id)
 
-'''
-llama 2
-Attention: GQA with KV catch
-Mask: Casual
-position: RoPE
-FF: SwiGLU
-Norm: pre norm (RMS norm)
-'''
+# --- llama 2 ---
 class llama_2_Block(nn.Module):
     def __init__(self, embed_dim, num_query_heads, num_kv_heads, batch_size, kv_seq_len, hidden_dim,
                 eps=1e-5, dropout=0.1, dtype=torch.float32, device='cpu'):
@@ -179,7 +165,7 @@ class llama_2(nn.Module):
         decoding loops because cached states are reused.
 
     Architecture details:
-        - Attention: Grouped-Query Attention (GQA) with KV cache.
+        - Attention: Grouped-Query Attention (GQA) with KV cache. [13B and 70B model]
         - Masking: Causal mask.
         - Position encoding: RoPE (enabled in attention call).
         - Feed-forward: SwiGLU.
@@ -189,7 +175,7 @@ class llama_2(nn.Module):
         - Family: LLaMA 2 generation decoder transformers.
         - Why important: GQA improves inference efficiency while preserving
           quality compared with full MHA at similar scale.
-        - Paper/report: TODO (add link manually).
+        - Paper/report: https://arxiv.org/abs/2307.09288
 
     Example:
         >>> import torch

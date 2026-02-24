@@ -8,7 +8,7 @@ Each model section contains an industrial/research-oriented class docstring with
 - architecture details,
 - practical notes,
 - simple usage example,
-- placeholder to add the official paper/report link.
+- official paper/report: https://arxiv.org/pdf/2403.08295.
 """
 
 import torch
@@ -20,14 +20,7 @@ from stackformer.modules.Feed_forward import FF_GeGLU
 from stackformer.modules.Normalization import RMSNormalization
 from stackformer.generate import text_generate
 
-'''
-Gemma 1 2B:
-Attention: MQH
-Mask: Casual
-position: RoPE
-FF: GeGLU
-Norm: pre norm (RMS norm)
-'''
+# --- Gemma 1 2B ---
 class gemma_1_2b_block(nn.Module):
     def __init__(self, embed_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
@@ -83,7 +76,7 @@ class gemma_1_2b(nn.Module):
         - Family: Gemma-style decoder language models.
         - Why used: efficient autoregressive generation with strong scaling
           behavior in modern transformer stacks.
-        - Paper/report: TODO (add link manually).
+        - Paper/report: https://arxiv.org/pdf/2403.08295
 
     Example:
         >>> import torch
@@ -133,14 +126,7 @@ class gemma_1_2b(nn.Module):
     def generate(self, prompt_ids, max_context_len=128, max_new_tokens=50, temperature=1.0, top_k=None, top_p=1.0, eos_token_id=None):
         return text_generate(self, prompt_ids, max_context_len, max_new_tokens, temperature, top_k, top_p, eos_token_id)
 
-'''
-Gemma 1 7B:
-Attention: MHA
-Mask: Casual
-position: RoPE
-FF: GeGLU
-Norm: pre norm (RMS norm)
-'''
+# --- Gemma 1 7B ---
 class gemma_1_7b_block(nn.Module):
     def __init__(self, embed_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
@@ -195,7 +181,7 @@ class gemma_1_7b(nn.Module):
         - Family: Gemma-style decoder language models.
         - Tradeoff: higher modeling capacity than smaller variants at increased
           memory/compute cost.
-        - Paper/report: TODO (add link manually).
+        - Paper/report: https://arxiv.org/pdf/2403.08295
 
     Example:
         >>> import torch
