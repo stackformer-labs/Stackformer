@@ -26,6 +26,9 @@ from .modules.Attention import Self_Attention
 from .modules.Attention import kv_cache_group_query
 from .modules.Attention import kv_cache_multihead
 
+# --- Masking mechanisms ---
+from .modules.Masking import make_mask
+
 # --- Normalization layers ---
 from .modules.Normalization import LayerNormalization
 from .modules.Normalization import RMSNormalization
@@ -87,6 +90,7 @@ __all__ = [
     "Group_query_Attention_With_RoPE",
     "LayerNormalization",
     "Local_Attention",
+    "mask",
     "Multi_Head_Attention",
     "Multi_Head_Attention_With_RoPE",
     "Multi_query_Attention",

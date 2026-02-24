@@ -1,7 +1,6 @@
-stackformer/modules/mask.py
-stackformer/modules/tokenizer.py
-
 stackformer/datasets/
+
+stackformer/modules/tokenizer.py
 
 How to update pipy.txt
 
