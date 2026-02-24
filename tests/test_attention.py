@@ -1,5 +1,4 @@
 import torch
-import pytest
 
 from stackformer.modules.Attention import (
     Self_Attention,
