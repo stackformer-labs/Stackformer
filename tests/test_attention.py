@@ -22,7 +22,7 @@ HEADS = 2
 KV_HEADS = 1
 WINDOW = 2
 
-# Mask configurations
+
 MASKS = [
     dict(mask_type=["causal"]),
     dict(mask_type=["sliding_window"], window_size=2),
@@ -33,7 +33,7 @@ MASKS = [
     dict(mask_type=["full"]),
 ]
 
-# Attention constructors
+
 ATTENTIONS = [
     lambda kw: Self_Attention(EMB, dropout=0.0, **kw),
     lambda kw: Multi_Head_Attention(embed_dim=EMB, num_heads=HEADS, dropout=0.0, **kw),
@@ -44,42 +44,42 @@ ATTENTIONS = [
     lambda kw: Group_query_Attention_With_RoPE(embed_dim=EMB, num_query_heads=HEADS, num_kv_heads=KV_HEADS, dropout=0.0, **kw),
 ]
 
-# Core mask × attention test
-@pytest.mark.parametrize("mask_kw", MASKS)
-@pytest.mark.parametrize("ctor", ATTENTIONS)
-def test_attention_variants_with_masks(mask_kw, ctor):
-    x = torch.randn(BATCH, SEQ, EMB, requires_grad=True)
 
-    attn = ctor(mask_kw)
-    out = attn(x)
+def test_attention_variants_with_masks():
+    for mask_kw in MASKS:
+        for ctor in ATTENTIONS:
+            x = torch.randn(BATCH, SEQ, EMB, requires_grad=True)
 
-    assert out.shape == x.shape
-    assert not torch.isnan(out).any()
+            attn = ctor(mask_kw)
+            out = attn(x)
 
-    out.mean().backward()
+            assert out.shape == x.shape
+            assert not torch.isnan(out).any()
 
-# Cross attention (special case)
-@pytest.mark.parametrize("mask_kw", MASKS)
-def test_cross_attention(mask_kw):
-    q = torch.randn(BATCH, SEQ, EMB, requires_grad=True)
-    ctx = torch.randn(BATCH, SEQ, EMB)
+            out.mean().backward()
 
-    cross = Cross_MultiHead_Attention(embed_dim=EMB, num_heads=HEADS, dropout=0.0, **mask_kw)
-    out = cross(q, context=ctx)
 
-    assert out.shape == q.shape
-    assert not torch.isnan(out).any()
+def test_cross_attention():
+    for mask_kw in MASKS:
+        q = torch.randn(BATCH, SEQ, EMB, requires_grad=True)
+        ctx = torch.randn(BATCH, SEQ, EMB)
 
-    out.mean().backward()
+        cross = Cross_MultiHead_Attention(embed_dim=EMB, num_heads=HEADS, dropout=0.0, **mask_kw)
+        out = cross(q, context=ctx)
 
-# Local attention (unchanged)
+        assert out.shape == q.shape
+        assert not torch.isnan(out).any()
+
+        out.mean().backward()
+
+
 def test_local_attention():
     x = torch.randn(BATCH, SEQ, EMB)
     local = Local_Attention(embed_dim=EMB, window_size=WINDOW, num_heads=HEADS, dropout=0.0)
     out = local(x)
     assert out.shape == x.shape
 
-# KV cache tests (unchanged)
+
 def test_kv_cache_multihead():
     x = torch.randn(BATCH, SEQ, EMB)
     kv = kv_cache_multihead(embed_dim=EMB, num_heads=HEADS, batch_size=BATCH, kv_seq_len=SEQ)
