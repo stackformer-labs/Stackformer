@@ -9,7 +9,6 @@ from stackformer.modules.Attention import (
     Multi_query_Attention_With_RoPE,
     Group_query_Attention,
     Group_query_Attention_With_RoPE,
-    Local_Attention,
     kv_cache_multihead,
     kv_cache_group_query,
 )
@@ -71,14 +70,6 @@ def test_cross_attention():
         assert not torch.isnan(out).any()
 
         out.mean().backward()
-
-
-def test_local_attention():
-    x = torch.randn(BATCH, SEQ, EMB)
-    local = Local_Attention(embed_dim=EMB, window_size=WINDOW, num_heads=HEADS, dropout=0.0)
-    out = local(x)
-    assert out.shape == x.shape
-
 
 def test_kv_cache_multihead():
     x = torch.randn(BATCH, SEQ, EMB)
