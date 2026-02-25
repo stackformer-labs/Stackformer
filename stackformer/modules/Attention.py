@@ -162,6 +162,7 @@ class Multi_Head_Attention(nn.Module):
         num_heads (int, required): Number of query heads ``H``.
             Rule: ``embed_dim % num_heads == 0`` (enforced).
         dropout (float, optional, default=0.0): Dropout on attention probs.
+        dropout (float, optional, default=0.0): Dropout on attention probs.
         qkv_bias (bool, optional, default=False): Bias in Q/K/V projections.
         device (str or torch.device, optional, default='cpu').
         dtype (torch.dtype, optional, default=torch.float32).
@@ -279,6 +280,7 @@ class Multi_Head_Attention_With_RoPE(nn.Module):
             Rules:
             - ``embed_dim % num_heads == 0``
             - ``head_dim`` must be even for RoPE pair-rotation.
+        dropout (float, optional, default=0.0).
         dropout (float, optional, default=0.0).
         qkv_bias (bool, optional, default=False).
         device (optional, default='cpu').
@@ -412,6 +414,7 @@ class Cross_MultiHead_Attention(nn.Module):
         embed_dim (int, required).
         num_heads (int, required): ``embed_dim % num_heads == 0``.
         dropout (float, optional, default=0.0).
+        dropout (float, optional, default=0.0).
         qkv_bias (bool, optional, default=False).
         device (optional, default='cpu').
         dtype (optional, default=torch.float32).
@@ -523,6 +526,7 @@ class Multi_query_Attention(nn.Module):
         num_heads (int, required): Number of query heads. Rule:
             ``embed_dim % num_heads == 0``.
         dropout (float, optional, default=0.0).
+        dropout (float, optional, default=0.0).
         qkv_bias (bool, optional, default=False).
         device (optional, default='cpu').
         dtype (optional, default=torch.float32).
@@ -629,6 +633,7 @@ class Multi_query_Attention_With_RoPE(nn.Module):
         embed_dim (int, required).
         num_heads (int, required): ``embed_dim % num_heads == 0`` and even
             ``head_dim`` for RoPE.
+        dropout (float, optional, default=0.0).
         dropout (float, optional, default=0.0).
         qkv_bias (bool, optional, default=False).
         device (optional, default='cpu').
@@ -766,6 +771,7 @@ class Group_query_Attention(nn.Module):
         num_kv_heads (int, required): Rule ``num_query_heads % num_kv_heads == 0``.
         qkv_bias (bool, optional, default=False).
         dropout (float, optional, default=0.0).
+        dropout (float, optional, default=0.0).
         device (optional, default='cpu').
         dtype (optional, default=torch.float32).
         mask_type ([str], optional, default=['causal']): 'causal' or 'sliding_window'.
@@ -875,6 +881,7 @@ class Group_query_Attention_With_RoPE(nn.Module):
         num_query_heads (int, required): ``embed_dim % num_query_heads == 0``.
         num_kv_heads (int, required): ``num_query_heads % num_kv_heads == 0``.
         qkv_bias (bool, optional, default=False).
+        dropout (float, optional, default=0.0).
         dropout (float, optional, default=0.0).
         device (optional, default='cpu').
         dtype (optional, default=torch.float32).
@@ -1017,6 +1024,7 @@ class kv_cache_multihead(nn.Module):
         batch_size (int, required): Preallocated cache batch capacity.
         kv_seq_len (int, required): Maximum cache sequence length reference.
         qkv_bias (bool, optional, default=False).
+        dropout (float, optional, default=0.0).
         dropout (float, optional, default=0.0).
         device (optional, default='cpu').
         dtype (optional, default=torch.float32).
@@ -1163,6 +1171,7 @@ class kv_cache_group_query(nn.Module):
         kv_seq_len (int, required): Maximum cache length reference.
         batch_size (int, required): Cache batch capacity.
         qkv_bias (bool, optional, default=False).
+        dropout (float, optional, default=0.0).
         dropout (float, optional, default=0.0).
         device (optional, default='cpu').
         dtype (optional, default=torch.float32).
