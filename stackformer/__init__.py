@@ -17,7 +17,6 @@ from .modules.position_embedding import SinusoidalPositionalEmbedding
 from .modules.Attention import Cross_MultiHead_Attention
 from .modules.Attention import Group_query_Attention
 from .modules.Attention import Group_query_Attention_With_RoPE
-from .modules.Attention import Local_Attention
 from .modules.Attention import Multi_Head_Attention
 from .modules.Attention import Multi_Head_Attention_With_RoPE
 from .modules.Attention import Multi_query_Attention
