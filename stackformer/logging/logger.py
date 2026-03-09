@@ -1,21 +1,8 @@
-"""
-stackformer.logging.logger
+"""Unified logger interface for CSV/TensorBoard/W&B backends."""
 
-Unified multi-backend logger for StackFormer.
+from __future__ import annotations
 
-Supports:
----------
-• CSV logging
-• TensorBoard logging
-• Weights & Biases logging
-
-Design goals
-------------
-• Single interface for all logging backends
-• Minimal overhead
-• Easy to extend
-• Compatible with Trainer monitor system
-"""
+from typing import Any, Dict, List
 
 from stackformer.logging.csv_logger import CSVLogger
 from stackformer.logging.tensorboard_logger import TensorBoardLogger
@@ -23,123 +10,61 @@ from stackformer.utils.utils import print_once
 
 
 class Logger:
+    """Multiplex metrics to one or more logging backends."""
 
     def __init__(
         self,
-        csv=True,
-        tensorboard=False,
-        wandb=False,
-        log_dir="logs",
-        experiment_name="run",
-        wandb_project="stackformer",
-        wandb_config=None,
+        csv: bool = True,
+        tensorboard: bool = False,
+        wandb: bool = False,
+        log_dir: str = "logs",
+        experiment_name: str = "run",
+        wandb_project: str = "stackformer",
+        wandb_config: dict | None = None,
     ):
-
-        self.backends = []
-
-        # --------------------------------
-        # CSV Logger
-        # --------------------------------
+        self.backends: List[Any] = []
 
         if csv:
-
-            self.backends.append(
-                CSVLogger(
-                    log_dir=log_dir,
-                    filename=f"{experiment_name}_metrics.csv",
-                )
-            )
-
+            self.backends.append(CSVLogger(log_dir=log_dir, filename=f"{experiment_name}_metrics.csv"))
             print_once("[Logger] CSV logging enabled")
 
-        # --------------------------------
-        # TensorBoard Logger
-        # --------------------------------
-
         if tensorboard:
-
-            self.backends.append(
-                TensorBoardLogger(
-                    log_dir=log_dir,
-                    experiment_name=experiment_name,
-                )
-            )
-
+            self.backends.append(TensorBoardLogger(log_dir=log_dir, experiment_name=experiment_name))
             print_once("[Logger] TensorBoard logging enabled")
 
-        # --------------------------------
-        # WandB Logger
-        # --------------------------------
-
         if wandb:
+            from stackformer.logging.wandb_logger import WandBLogger
 
-            try:
-                from stackformer.logging.wandb_logger import WandBLogger
-
-                self.backends.append(
-                    WandBLogger(
-                        project=wandb_project,
-                        experiment_name=experiment_name,
-                        config=wandb_config,
-                    )
-                )
-
-                print_once("[Logger] Weights & Biases logging enabled")
-
-            except ImportError:
-
-                raise ImportError(
-                    "wandb is not installed. Install with `pip install wandb`."
-                )
+            self.backends.append(
+                WandBLogger(project=wandb_project, experiment_name=experiment_name, config=wandb_config)
+            )
+            print_once("[Logger] Weights & Biases logging enabled")
 
         if not self.backends:
             print_once("[Logger] No logging backend enabled")
 
-    # -----------------------------------------------------
-
-    def log(self, metrics: dict):
-        """
-        Log metrics to all active backends.
-        """
-
+    def log(self, metrics: Dict[str, float]) -> None:
         if not metrics:
             return
-
         for backend in self.backends:
-
             try:
                 backend.log(metrics)
             except Exception:
-                # prevent training interruption
                 pass
 
-    # -----------------------------------------------------
-
-    def close(self):
-        """
-        Close all loggers gracefully.
-        """
-
+    def close(self) -> None:
         for backend in self.backends:
-
             try:
-
                 if hasattr(backend, "flush"):
                     backend.flush()
-
                 if hasattr(backend, "close"):
                     backend.close()
-
                 if hasattr(backend, "finish"):
                     backend.finish()
-
             except Exception:
                 pass
 
-    # -----------------------------------------------------
-
     def __del__(self):
-
         try:
             self.close()
         except Exception:

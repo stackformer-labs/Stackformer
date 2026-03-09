@@ -1,22 +1,18 @@
-"""
-AMP management utilities.
+"""Utilities for automatic mixed precision (AMP).
 
-Provides a thin wrapper around torch.cuda.amp.GradScaler
-to keep mixed precision logic isolated from the training engine.
+This module wraps ``torch.cuda.amp.GradScaler`` behind a small interface that
+is safe across CPU/CUDA environments.
 """
 
 import torch
+from contextlib import nullcontext
 
 
 class AMPScaler:
-    """
-    Automatic Mixed Precision scaler wrapper.
+    """Automatic mixed precision scaler wrapper.
 
-    Handles:
-    - loss scaling
-    - optimizer stepping
-    - scaler updates
-    - safe CPU fallback
+    Args:
+        enabled: Whether AMP should be enabled when CUDA is available.
     """
 
     def __init__(self, enabled: bool = True):
@@ -27,6 +23,16 @@ class AMPScaler:
             self.scaler = torch.cuda.amp.GradScaler()
         else:
             self.scaler = None
+
+    def autocast(self):
+        """Return an autocast context manager.
+
+        Returns:
+            A CUDA autocast context when AMP is enabled, else a no-op context.
+        """
+        if not self.enabled:
+            return nullcontext()
+        return torch.cuda.amp.autocast()
 
     # -------------------------------------------------------------
 

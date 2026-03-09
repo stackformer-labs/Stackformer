@@ -1,183 +1,83 @@
-"""
-General utilities used across StackFormer.
-"""
+"""General utility helpers used across StackFormer."""
+
+from __future__ import annotations
 
 import os
 import random
 import time
 from typing import Any
 
-import numpy as np
 import torch
 
+try:
+    import numpy as np
+except Exception:  # optional dependency in minimal environments
+    np = None
 
-# -----------------------------------------------------
-# Reproducibility
-# -----------------------------------------------------
 
-def seed_everything(seed: int = 42):
-    """
-    Set random seed for full reproducibility.
-
-    Affects:
-    - Python
-    - NumPy
-    - PyTorch
-    - CUDA
-    """
-
+def seed_everything(seed: int = 42) -> None:
+    """Set reproducibility seeds across supported libraries."""
     random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+    if np is not None:
+        np.random.seed(seed)
 
+    torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
 
     os.environ["PYTHONHASHSEED"] = str(seed)
-
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
 
-# -----------------------------------------------------
-# Device utilities
-# -----------------------------------------------------
-
 def move_to_device(obj: Any, device):
-    """
-    Recursively move tensors to device.
-
-    Supports:
-    - tensors
-    - dict
-    - list / tuple
-    """
-
+    """Recursively move tensors and collections to ``device``."""
     if torch.is_tensor(obj):
         return obj.to(device, non_blocking=True)
-
     if isinstance(obj, dict):
         return {k: move_to_device(v, device) for k, v in obj.items()}
-
     if isinstance(obj, (list, tuple)):
         return type(obj)(move_to_device(x, device) for x in obj)
-
     return obj
 
 
-# -----------------------------------------------------
-# Model utilities
-# -----------------------------------------------------
+def ensure_dir(path: str) -> str:
+    """Create a directory if it does not exist and return the same path."""
+    os.makedirs(path, exist_ok=True)
+    return path
 
-def count_parameters(model, trainable_only: bool = True):
-    """
-    Count number of model parameters.
-    """
 
+def count_parameters(model: torch.nn.Module, trainable_only: bool = True) -> int:
+    """Count model parameters."""
     if trainable_only:
         return sum(p.numel() for p in model.parameters() if p.requires_grad)
-
     return sum(p.numel() for p in model.parameters())
 
 
-def format_parameters(num_params: int):
-    """
-    Format parameter count into readable string.
-    """
-
-    if num_params >= 1e9:
-        return f"{num_params/1e9:.2f}B"
-
-    if num_params >= 1e6:
-        return f"{num_params/1e6:.2f}M"
-
-    if num_params >= 1e3:
-        return f"{num_params/1e3:.2f}K"
-
-    return str(num_params)
+def timestamp() -> str:
+    """Return unix timestamp string."""
+    return str(int(time.time()))
 
 
-# -----------------------------------------------------
-# Timing utilities
-# -----------------------------------------------------
+# Distributed-safe helpers
 
-def format_time(seconds: float):
-    """
-    Convert seconds into readable time string.
-    """
-
-    seconds = int(seconds)
-
-    hours = seconds // 3600
-    minutes = (seconds % 3600) // 60
-    seconds = seconds % 60
-
-    if hours > 0:
-        return f"{hours}h {minutes}m {seconds}s"
-
-    if minutes > 0:
-        return f"{minutes}m {seconds}s"
-
-    return f"{seconds}s"
-
-
-def current_time():
-    """
-    Return formatted timestamp.
-    """
-
-    return time.strftime("%Y-%m-%d %H:%M:%S")
-
-
-# -----------------------------------------------------
-# Distributed helpers
-# -----------------------------------------------------
-
-def get_rank():
-    """
-    Return process rank safely.
-    """
-
-    if not torch.distributed.is_available():
+def get_rank() -> int:
+    if not torch.distributed.is_available() or not torch.distributed.is_initialized():
         return 0
-
-    if not torch.distributed.is_initialized():
-        return 0
-
     return torch.distributed.get_rank()
 
 
-def get_world_size():
-    """
-    Return world size safely.
-    """
-
-    if not torch.distributed.is_available():
+def get_world_size() -> int:
+    if not torch.distributed.is_available() or not torch.distributed.is_initialized():
         return 1
-
-    if not torch.distributed.is_initialized():
-        return 1
-
     return torch.distributed.get_world_size()
 
 
-def is_main_process():
-    """
-    True only for rank 0 process.
-    """
-
+def is_main_process() -> bool:
     return get_rank() == 0
 
 
-# -----------------------------------------------------
-# Logging helpers
-# -----------------------------------------------------
-
-def print_once(*args, **kwargs):
-    """
-    Print only from main process.
-    """
-
+def print_once(*args, **kwargs) -> None:
     if is_main_process():
         print(*args, **kwargs)

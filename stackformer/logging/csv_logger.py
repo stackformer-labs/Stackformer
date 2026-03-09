@@ -1,123 +1,62 @@
-"""
-stackformer.logging.csv_logger
+"""CSV logger backend."""
 
-Lightweight CSV logger for training metrics.
-
-Design goals
-------------
-• Zero external dependencies
-• Minimal overhead during training
-• Easy analysis with pandas
-• Compatible with MetricTracker
-• Distributed-safe logging
-"""
+from __future__ import annotations
 
 import csv
 import os
-import time
+from typing import Dict
 
-from stackformer.utils.utils import is_main_process, print_once
+from stackformer.utils.utils import is_main_process
 
 
 class CSVLogger:
+    """Write scalar metrics to CSV.
 
-    def __init__(
-        self,
-        log_dir="logs",
-        filename="metrics.csv",
-        flush_every=10,
-    ):
+    Args:
+        log_dir: Output log directory.
+        filename: CSV filename.
+    """
 
+    def __init__(self, log_dir: str = "logs", filename: str = "metrics.csv"):
         self.enabled = is_main_process()
+        self.file = None
+        self.writer = None
+        self.headers_written = False
 
         if not self.enabled:
             return
 
         os.makedirs(log_dir, exist_ok=True)
+        self.path = os.path.join(log_dir, filename)
+        self.file = open(self.path, mode="a", newline="", encoding="utf-8")
 
-        self.filepath = os.path.join(log_dir, filename)
-
-        self.flush_every = flush_every
-        self._step = 0
-
-        self.file = open(self.filepath, "a", newline="")
-        self.writer = None
-        self.fieldnames = None
-
-        self.start_time = time.time()
-
-        print_once(f"[CSVLogger] Logging metrics → {self.filepath}")
-
-    # --------------------------------------------------
-
-    def log(self, metrics: dict):
-        """
-        Log metrics for current step.
-        """
-
-        if not self.enabled:
+    def log(self, metrics: Dict[str, float]) -> None:
+        if not self.enabled or not metrics:
             return
-
-        if not metrics:
+        if self.file is None:
             return
-
-        metrics = dict(metrics)
-
-        metrics["time"] = time.time() - self.start_time
-        metrics["step"] = self._step
-
-        # --------------------------------------------------
-        # Initialize writer
-        # --------------------------------------------------
 
         if self.writer is None:
+            self.writer = csv.DictWriter(self.file, fieldnames=list(metrics.keys()))
 
-            self.fieldnames = list(metrics.keys())
+        if not self.headers_written:
+            self.writer.writeheader()
+            self.headers_written = True
 
-            self.writer = csv.DictWriter(
-                self.file,
-                fieldnames=self.fieldnames,
-            )
+        clean = {k: v for k, v in metrics.items() if isinstance(v, (int, float))}
+        self.writer.writerow(clean)
 
-            if self.file.tell() == 0:
-                self.writer.writeheader()
-
-        # --------------------------------------------------
-        # Handle new metric keys dynamically
-        # --------------------------------------------------
-
-        for key in metrics.keys():
-            if key not in self.fieldnames:
-                self.fieldnames.append(key)
-
-        row = {k: metrics.get(k, "") for k in self.fieldnames}
-
-        self.writer.writerow(row)
-
-        self._step += 1
-
-        if self._step % self.flush_every == 0:
-            self.file.flush()
-
-    # --------------------------------------------------
-
-    def flush(self):
-
+    def flush(self) -> None:
         if self.enabled and self.file:
             self.file.flush()
 
-    # --------------------------------------------------
-
-    def close(self):
-
+    def close(self) -> None:
         if self.enabled and self.file:
+            self.file.flush()
             self.file.close()
             self.file = None
 
-    # --------------------------------------------------
-
     def __del__(self):
-
         try:
             self.close()
         except Exception:
