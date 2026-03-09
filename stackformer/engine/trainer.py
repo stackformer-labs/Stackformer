@@ -7,10 +7,12 @@ from typing import Any, Callable, Optional
 import torch
 from torch.utils.data import DataLoader, Subset
 
+from stackformer.amp import initialize_scaler
 from stackformer.distributed.ddp import init_distributed, is_distributed, wrap_model_ddp
 from stackformer.engine.checkpoint import CheckpointManager
 from stackformer.engine.engine import Engine
 from stackformer.engine.state import TrainingState
+from stackformer.logging import Logger
 from stackformer.optim.factories import create_optimizer, create_scheduler
 from stackformer.optim.loss_fn import language_modeling_cross_entropy
 from stackformer.utils.device import get_device, print_device_info
@@ -74,6 +76,7 @@ class Trainer:
         resume_from: Optional[str] = None,
         monitor: Optional[Any] = None,
         scaler: Optional[Any] = None,
+        use_amp: bool = False,
         use_ddp: bool = False,
         ddp_backend: Optional[str] = None,
         lr: float = 3e-4,
@@ -105,6 +108,7 @@ class Trainer:
         self.grad_accumulation_step = max(1, int(grad_accumulation_step))
         self.max_grad_norm = max_grad_norm
         self.monitor = monitor
+        self.use_amp = bool(use_amp)
         self.scaler = scaler
         self.use_ddp = bool(use_ddp)
         self.ddp_backend = ddp_backend
@@ -121,8 +125,10 @@ class Trainer:
         self._setup_seed()
         self._setup_distributed()
         self._setup_device()
+        self._setup_scaler()
         self._setup_optimizer()
         self._setup_scheduler()
+        self._setup_monitor()
         self._setup_checkpoint_manager()
 
         self.state = TrainingState(
@@ -167,6 +173,20 @@ class Trainer:
         if self.use_ddp and is_distributed():
             self.model = wrap_model_ddp(self.model)
         print_device_info()
+
+
+    def _setup_scaler(self) -> None:
+        if self.scaler is not None:
+            return
+        self.scaler = initialize_scaler(enabled=self.use_amp)
+
+    def _setup_monitor(self) -> None:
+        if self.monitor is not None:
+            return
+        if not is_main_process():
+            self.monitor = None
+            return
+        self.monitor = Logger(csv=True, tensorboard=False, wandb=False, log_dir="logs", experiment_name="stackformer")
 
     def _setup_optimizer(self) -> None:
         if self.optimizer is not None:

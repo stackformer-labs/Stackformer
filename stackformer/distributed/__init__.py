@@ -3,14 +3,15 @@
 from .ddp import (
     barrier,
     cleanup,
+    cleanup_distributed,
     distributed_sampler,
     get_local_rank,
     get_rank,
     get_world_size,
     init_distributed,
-    setup_ddp,
     is_distributed,
     is_main_process,
+    setup_ddp,
     wrap_model_ddp,
 )
 
@@ -26,4 +27,5 @@ __all__ = [
     "is_main_process",
     "barrier",
     "cleanup",
+    "cleanup_distributed",
 ]
