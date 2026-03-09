@@ -1,9 +1,9 @@
 [project]
 name = "Stackformer"
-version = "0.1.7"
+version = "0.1.8"
 description = "Modular transformer blocks built in PyTorch"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "MIT"
 
 authors = [
