@@ -39,8 +39,8 @@ except Exception as exc:  # optional dependency: tiktoken
     Embedding_using_tiktoken = None  # type: ignore[assignment]
 
 try:
-    from .trainer import Trainer
-except Exception as exc:  # optional dependency: transformers
+    from .engine import Trainer
+except Exception as exc:
     TrainerImportError = exc
     Trainer = None  # type: ignore[assignment]
 

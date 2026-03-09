@@ -1,17 +1,21 @@
-"""CPU-default distributed training setup example."""
+"""Distributed training example.
+
+Single-process CPU run:
+    python examples/train_ddp.py
+
+Multi-process CPU run:
+    torchrun --standalone --nproc_per_node=2 examples/train_ddp.py
+"""
 
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from stackformer.distributed import init_distributed, is_distributed
+from stackformer.distributed import cleanup_distributed
 from stackformer.engine import Trainer
 
 
 def main():
-    # No-op in single-process CPU runs, but demonstrates DDP entrypoint.
-    init_distributed(backend="gloo")
-
     inputs = torch.randint(0, 8, (32, 4))
     targets = torch.randint(0, 8, (32, 4))
     loader = DataLoader(TensorDataset(inputs, targets), batch_size=8)
@@ -21,13 +25,15 @@ def main():
         model=model,
         train_dataloader=loader,
         device="cpu",
-        use_ddp=is_distributed(),
+        use_ddp=True,
+        ddp_backend="gloo",
         max_epochs=1,
         max_train_steps=2,
         checkpoint_dir="ddp_example_ckpts",
     )
     trainer.fit()
-    print("DDP example finished (single-process compatible).")
+    cleanup_distributed()
+    print("DDP example finished.")
 
 
 if __name__ == "__main__":
