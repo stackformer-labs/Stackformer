@@ -13,7 +13,8 @@ authors = [
 dependencies = [
   "torch>=2.0,<2.7",
   "tqdm>=4.5,<5.0",
-  "tiktoken>=0.7,<1.0"
+  "tiktoken>=0.7,<1.0",
+  "tensorboard>=2.14,<3.0"
 ]
 
 classifiers = [
@@ -28,8 +29,15 @@ classifiers = [
 train = [
   "transformers>=4.40,<5.0"
 ]
-dev = [
+logging = [
+  "wandb>=0.17,<1.0"
+]
+test = [
   "pytest>=8.0,<9.0"
+]
+dev = [
+  "pytest>=8.0,<9.0",
+  "tensorboard>=2.14,<3.0"
 ]
 
 [project.urls]

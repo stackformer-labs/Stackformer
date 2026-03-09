@@ -84,3 +84,8 @@ def barrier() -> None:
 def cleanup() -> None:
     if is_distributed():
         dist.destroy_process_group()
+
+
+def setup_ddp(backend: str | None = None) -> None:
+    """Backward-compatible alias for distributed initialization."""
+    init_distributed(backend=backend)

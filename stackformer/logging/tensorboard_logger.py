@@ -6,8 +6,6 @@ import datetime
 import os
 from typing import Dict
 
-from torch.utils.tensorboard import SummaryWriter
-
 from stackformer.utils.utils import is_main_process
 
 
@@ -21,6 +19,11 @@ class TensorBoardLogger:
 
         if not self.enabled:
             return
+
+        try:
+            from torch.utils.tensorboard import SummaryWriter
+        except ImportError as exc:
+            raise ImportError("tensorboard is not installed. Install with `pip install tensorboard`.") from exc
 
         if auto_timestamp:
             experiment_name = f"{experiment_name}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
