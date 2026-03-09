@@ -1,49 +1,51 @@
+"""Checkpoint save/load utilities.
+
+This module provides robust checkpointing for training state and optional
+TorchScript model export.
+"""
+
+from __future__ import annotations
+
 import os
+from typing import Any, Dict, Optional
+
 import torch
 
-from stackformer.utils.utils import print_once, is_main_process
+from stackformer.utils.utils import is_main_process, print_once
 
 
 class CheckpointManager:
-    """
-    Handles saving and loading training checkpoints.
+    """Manage training checkpoints.
 
-    Features
-    --------
-    • Safe checkpoint saving (atomic write)
-    • Resume training support
-    • Optional optimizer / scheduler / scaler restore
-    • Device-safe loading
-    • DDP-safe checkpointing
+    Args:
+        output_dir: Directory to store checkpoint files.
+        device: Device used for loading checkpoints.
     """
 
-    def __init__(self, output_dir: str, device="cpu"):
-
+    def __init__(self, output_dir: str, device: str | torch.device = "cpu"):
         self.output_dir = output_dir
         self.device = device
-
         os.makedirs(self.output_dir, exist_ok=True)
 
-    # -----------------------------------------------------
-    # Public API
-    # -----------------------------------------------------
+    def save(self, state: Dict[str, Any], name: str = "latest") -> str | None:
+        """Save model and optimizer state.
 
-    def save(self, state: dict, name: str = "latest"):
-        """
-        Save training state.
-        """
+        Args:
+            state: Runtime state dictionary with keys like ``model``, ``optimizer``.
+            name: Checkpoint suffix name.
 
-        # Only main process saves checkpoint
+        Returns:
+            Saved path, or ``None`` for non-main distributed ranks.
+        """
         if not is_main_process():
-            return
+            return None
 
+        model = state.get("model")
+        if model is None:
+            raise ValueError("`state['model']` is required to save a checkpoint.")
+
+        model = self._unwrap_model(model)
         path = self._get_checkpoint_path(name)
-
-        model = state["model"]
-
-        # unwrap DDP model if necessary
-        if hasattr(model, "module"):
-            model = model.module
 
         checkpoint = {
             "model_state_dict": model.state_dict(),
@@ -54,118 +56,121 @@ class CheckpointManager:
             "global_step": state.get("global_step", 0),
             "batch_idx": state.get("batch_idx", 0),
             "config": state.get("config", {}),
+            "jit_model_path": state.get("jit_model_path"),
         }
 
         self._safe_save(checkpoint, path)
+        print_once(f"[Checkpoint] Saved -> {path}")
+        return path
 
-        print_once(f"[Checkpoint] Saved → {path}")
+    def load(self, path: str, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Load checkpoint and restore runtime state.
 
-    # -----------------------------------------------------
+        Args:
+            path: Checkpoint path.
+            state: Runtime state dictionary.
 
-    def load(self, path: str, state: dict):
+        Returns:
+            Metadata dict (epoch/global_step/batch_idx/config/jit_model_path).
         """
-        Load checkpoint and restore training state.
-        """
-
         if not os.path.exists(path):
             raise FileNotFoundError(f"Checkpoint not found: {path}")
 
         checkpoint = torch.load(path, map_location=self.device)
 
-        model = state["model"]
+        model = state.get("model")
+        if model is None:
+            raise ValueError("`state['model']` is required to load a checkpoint.")
 
-        # unwrap DDP if needed
-        if hasattr(model, "module"):
-            model = model.module
-
-        # -------------------------------------------------
-        # Restore model
-        # -------------------------------------------------
-
+        model = self._unwrap_model(model)
         model.load_state_dict(checkpoint["model_state_dict"])
 
-        # -------------------------------------------------
-        # Restore optimizer
-        # -------------------------------------------------
-
-        optimizer = state.get("optimizer")
-        if optimizer is not None:
-            opt_state = checkpoint.get("optimizer_state_dict")
-            if opt_state is not None:
-                optimizer.load_state_dict(opt_state)
-
-        # -------------------------------------------------
-        # Restore scheduler
-        # -------------------------------------------------
-
-        scheduler = state.get("scheduler")
-        if scheduler is not None:
-            sch_state = checkpoint.get("scheduler_state_dict")
-            if sch_state is not None:
-                scheduler.load_state_dict(sch_state)
-
-        # -------------------------------------------------
-        # Restore AMP scaler
-        # -------------------------------------------------
-
-        scaler = state.get("scaler")
-        if scaler is not None:
-            scaler_state = checkpoint.get("scaler_state_dict")
-            if scaler_state is not None:
-                scaler.load_state_dict(scaler_state)
-
-        # -------------------------------------------------
-        # Metadata
-        # -------------------------------------------------
+        self._maybe_load_state_dict(state.get("optimizer"), checkpoint.get("optimizer_state_dict"), "optimizer")
+        self._maybe_load_state_dict(state.get("scheduler"), checkpoint.get("scheduler_state_dict"), "scheduler")
+        self._maybe_load_state_dict(state.get("scaler"), checkpoint.get("scaler_state_dict"), "scaler")
 
         metadata = {
             "epoch": checkpoint.get("epoch", 0),
             "global_step": checkpoint.get("global_step", 0),
             "batch_idx": checkpoint.get("batch_idx", 0),
             "config": checkpoint.get("config", {}),
+            "jit_model_path": checkpoint.get("jit_model_path"),
         }
-
-        print_once(f"[Checkpoint] Loaded ← {path}")
-
+        print_once(f"[Checkpoint] Loaded <- {path}")
         return metadata
 
-    # -----------------------------------------------------
-    # Internal helpers
-    # -----------------------------------------------------
+    def save_jit_model(self, model: torch.nn.Module, name: str = "latest_jit") -> str:
+        """Save a scripted TorchScript model artifact.
 
-    def _get_checkpoint_path(self, name: str):
+        Args:
+            model: PyTorch model to export.
+            name: Artifact suffix.
 
-        filename = f"checkpoint_{name}.pt"
-        return os.path.join(self.output_dir, filename)
-
-    # -----------------------------------------------------
-
-    def _safe_state_dict(self, obj):
+        Returns:
+            File path to scripted model.
         """
-        Safely get state_dict from optional objects.
-        """
+        if not is_main_process():
+            return ""
 
-        if obj is None:
+        model = self._unwrap_model(model)
+        model.eval()
+        path = os.path.join(self.output_dir, f"{name}.jit.pt")
+        tmp_path = f"{path}.tmp"
+
+        try:
+            scripted = torch.jit.script(model)
+            torch.jit.save(scripted, tmp_path)
+            os.replace(tmp_path, path)
+            print_once(f"[Checkpoint] TorchScript saved -> {path}")
+            return path
+        except Exception as exc:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            raise RuntimeError(f"TorchScript save failed: {exc}") from exc
+
+    def load_jit_model(self, path: str) -> torch.jit.ScriptModule:
+        """Load a TorchScript model artifact."""
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"TorchScript artifact not found: {path}")
+
+        try:
+            model = torch.jit.load(path, map_location=self.device)
+            model.eval()
+            return model
+        except Exception as exc:
+            raise RuntimeError(f"TorchScript load failed: {exc}") from exc
+
+    def _get_checkpoint_path(self, name: str) -> str:
+        return os.path.join(self.output_dir, f"checkpoint_{name}.pt")
+
+    def _safe_state_dict(self, obj: Any) -> Optional[Dict[str, Any]]:
+        if obj is None or not hasattr(obj, "state_dict"):
+            return None
+        try:
+            return obj.state_dict()
+        except Exception:
             return None
 
-        return obj.state_dict()
+    def _maybe_load_state_dict(self, obj: Any, state_dict: Optional[Dict[str, Any]], label: str) -> None:
+        if obj is None or state_dict is None:
+            return
+        if not hasattr(obj, "load_state_dict"):
+            return
+        try:
+            obj.load_state_dict(state_dict)
+        except Exception as exc:
+            print_once(f"[Checkpoint] Warning: failed to restore {label}: {exc}")
 
-    # -----------------------------------------------------
-
-    def _safe_save(self, obj: dict, path: str):
-        """
-        Prevent corrupted checkpoints by saving to temp file first.
-        """
-
-        tmp_path = path + ".tmp"
-
+    def _safe_save(self, obj: Dict[str, Any], path: str) -> None:
+        tmp_path = f"{path}.tmp"
         try:
             torch.save(obj, tmp_path)
             os.replace(tmp_path, path)
-
-        except Exception as e:
-
+        except Exception as exc:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
+            raise RuntimeError(f"Checkpoint save failed: {exc}") from exc
 
-            raise RuntimeError(f"Checkpoint save failed: {e}")
+    @staticmethod
+    def _unwrap_model(model: torch.nn.Module) -> torch.nn.Module:
+        return model.module if hasattr(model, "module") else model
