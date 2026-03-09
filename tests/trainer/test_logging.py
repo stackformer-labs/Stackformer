@@ -18,6 +18,4 @@ def test_unified_logger_uses_csv_backend(tmp_path):
     logger = Logger(csv=True, tensorboard=False, wandb=False, log_dir=str(tmp_path), experiment_name="run")
     logger.log({"loss": 0.5})
     logger.close()
-
-    files = list(Path(tmp_path).glob("run_metrics.csv"))
-    assert files
+    assert list(Path(tmp_path).glob("run_metrics.csv"))
