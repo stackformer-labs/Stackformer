@@ -8,7 +8,8 @@ from typing import Any, Callable, Optional, Tuple
 import torch
 
 from stackformer.logging.metrics import MetricTracker
-from stackformer.training.loops import train_loop, validation_loop
+from stackformer.amp import step_optimizer, update_scaler
+from stackformer.training.loops import eval_epoch, train_epoch
 from stackformer.utils.utils import is_main_process, move_to_device
 
 
@@ -43,10 +44,10 @@ class Engine:
 
     def train_one_epoch(self, dataloader, epoch: int) -> None:
         self.metrics.reset()
-        train_loop(self, dataloader, epoch)
+        train_epoch(self, dataloader, epoch)
 
     def validate_one_epoch(self, dataloader, epoch: int) -> None:
-        validation_loop(self, dataloader, epoch)
+        eval_epoch(self, dataloader, epoch)
 
     def _train_step(self, batch) -> dict:
         state = self.state
@@ -98,7 +99,7 @@ class Engine:
         if grad_norm is not None:
             self.metrics.update("grad_norm", grad_norm)
 
-        metrics = self.metrics.get_all()
+        metrics = self.metrics.get_all(reduce_distributed=True)
         metrics["lr"] = lr
         if state.global_step % self.log_every == 0:
             self._log_step(metrics)
@@ -122,10 +123,10 @@ class Engine:
         state = self.state
         scaler = state.scaler
         if scaler and scaler.is_enabled:
-            scaler.step(state.optimizer)
-            scaler.update()
+            step_optimizer(state.optimizer, scaler)
+            update_scaler(scaler)
         else:
-            state.optimizer.step()
+            step_optimizer(state.optimizer, None)
 
     def _scheduler_step(self) -> None:
         scheduler = self.state.scheduler

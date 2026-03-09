@@ -1,260 +1,132 @@
-"""
-stackformer.logging.metrics
+"""Metric utilities and streaming tracker."""
 
-Advanced metric tracking utilities for research training loops.
-
-Design goals
-------------
-• Extremely lightweight (runs every step)
-• Streaming statistics (no history storage)
-• Compatible with distributed training
-• Clear API for researchers
-• Works for LLM, vision, and segmentation tasks
-"""
+from __future__ import annotations
 
 from collections import defaultdict
 import math
 import time
 
+import torch
+import torch.distributed as dist
+
+
+def _safe_div(num: float, den: float) -> float:
+    return num / den if den else 0.0
+
+
+def distributed_mean(value: float | torch.Tensor) -> float:
+    tensor = torch.as_tensor(float(value), dtype=torch.float64)
+    if dist.is_available() and dist.is_initialized():
+        tensor = tensor.clone()
+        dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
+        tensor /= dist.get_world_size()
+    return float(tensor.item())
+
+
+def accuracy(preds: torch.Tensor, targets: torch.Tensor) -> float:
+    pred_ids = preds.argmax(dim=-1) if preds.ndim > targets.ndim else preds
+    return float((pred_ids == targets).float().mean().item())
+
+
+def perplexity(loss: float | torch.Tensor) -> float:
+    value = float(loss.item() if torch.is_tensor(loss) else loss)
+    try:
+        return float(math.exp(value))
+    except OverflowError:
+        return float("inf")
+
+
+def precision_recall_f1(preds: torch.Tensor, targets: torch.Tensor):
+    pred_ids = preds.argmax(dim=-1) if preds.ndim > targets.ndim else preds
+    pred_ids = pred_ids.view(-1)
+    targets = targets.view(-1)
+
+    tp = ((pred_ids == 1) & (targets == 1)).sum().item()
+    fp = ((pred_ids == 1) & (targets == 0)).sum().item()
+    fn = ((pred_ids == 0) & (targets == 1)).sum().item()
+
+    precision = _safe_div(tp, tp + fp)
+    recall = _safe_div(tp, tp + fn)
+    f1 = _safe_div(2 * precision * recall, precision + recall)
+    return float(precision), float(recall), float(f1)
+
+
+def precision(preds: torch.Tensor, targets: torch.Tensor) -> float:
+    return precision_recall_f1(preds, targets)[0]
+
+
+def recall(preds: torch.Tensor, targets: torch.Tensor) -> float:
+    return precision_recall_f1(preds, targets)[1]
+
+
+def f1_score(preds: torch.Tensor, targets: torch.Tensor) -> float:
+    return precision_recall_f1(preds, targets)[2]
+
 
 class _Metric:
-    """
-    Internal metric container.
-
-    Maintains:
-        sum
-        count
-        average
-        last value
-    """
-
     def __init__(self):
         self.reset()
 
-    # --------------------------------------------------
-
     def update(self, value):
-
         value = float(value)
-
         if math.isnan(value) or math.isinf(value):
             return
-
         self.last = value
         self.sum += value
         self.count += 1
 
-    # --------------------------------------------------
-
     def avg(self):
-
-        if self.count == 0:
-            return 0.0
-
-        return self.sum / self.count
-
-    # --------------------------------------------------
+        return 0.0 if self.count == 0 else self.sum / self.count
 
     def reset(self):
-
         self.sum = 0.0
         self.count = 0
         self.last = None
 
 
-# ======================================================
-# Metric Tracker
-# ======================================================
-
-
 class MetricTracker:
-    """
-    Streaming metric tracker for training loops.
-
-    Designed to run every step with minimal overhead.
-    """
-
     def __init__(self):
-
         self.metrics = defaultdict(_Metric)
-
         self.start_time = time.time()
         self.step_start_time = None
-
-    # --------------------------------------------------
 
     def update(self, name, value):
-        """
-        Update a metric value.
-        """
-
         self.metrics[name].update(value)
 
-    # --------------------------------------------------
-
     def avg(self, name):
-        """
-        Return running average.
-        """
-
         metric = self.metrics.get(name)
-
-        if metric is None:
-            return None
-
-        return metric.avg()
-
-    # --------------------------------------------------
-
-    def last(self, name):
-        """
-        Return last metric value.
-        """
-
-        metric = self.metrics.get(name)
-
-        if metric is None:
-            return None
-
-        return metric.last
-
-    # --------------------------------------------------
+        return None if metric is None else metric.avg()
 
     def compute(self, name):
-        """
-        Compatibility alias.
-        """
-
         return self.avg(name)
 
-    # --------------------------------------------------
-
     def reset(self):
-        """
-        Reset all metrics.
-        """
-
         for metric in self.metrics.values():
             metric.reset()
-
         self.start_time = time.time()
 
-    # --------------------------------------------------
-
-    def get_all(self):
-        """
-        Return all metric averages.
-        """
-
-        results = {}
-
-        for name, metric in self.metrics.items():
-            results[name] = metric.avg()
-
+    def get_all(self, reduce_distributed: bool = False):
+        results = {name: metric.avg() for name, metric in self.metrics.items()}
+        if reduce_distributed:
+            return {name: distributed_mean(value) for name, value in results.items()}
         return results
 
-    # ==================================================
-    # Timing utilities
-    # ==================================================
-
     def start_step_timer(self):
-        """
-        Start step timing.
-        """
-
         self.step_start_time = time.time()
 
-    # --------------------------------------------------
-
     def end_step_timer(self):
-        """
-        End step timer and record step_time metric.
-        """
-
         if self.step_start_time is None:
             return None
-
         step_time = time.time() - self.step_start_time
-
         self.update("step_time", step_time)
-
         self.step_start_time = None
-
         return step_time
 
-    # ==================================================
-    # Throughput metrics
-    # ==================================================
-
     def update_tokens(self, tokens):
-        """
-        Track tokens/sec (LLM training).
-        """
-
         self.update("tokens", tokens)
-
-        total_tokens = self.metrics["tokens"].sum
         elapsed = time.time() - self.start_time
-
         if elapsed > 0:
-            tokens_per_sec = total_tokens / elapsed
-            self.metrics["tokens_per_sec"].last = tokens_per_sec
-
-    # --------------------------------------------------
-
-    def update_samples(self, samples):
-        """
-        Track samples/sec (vision tasks).
-        """
-
-        self.update("samples", samples)
-
-        total_samples = self.metrics["samples"].sum
-        elapsed = time.time() - self.start_time
-
-        if elapsed > 0:
-            samples_per_sec = total_samples / elapsed
-            self.metrics["samples_per_sec"].last = samples_per_sec
-
-    # ==================================================
-    # Derived metrics
-    # ==================================================
+            self.metrics["tokens_per_sec"].last = self.metrics["tokens"].sum / elapsed
 
     def update_perplexity(self, loss):
-        """
-        Compute perplexity from cross-entropy loss.
-
-        PPL = exp(loss)
-        """
-
-        try:
-            ppl = math.exp(loss)
-        except OverflowError:
-            ppl = float("inf")
-
-        self.update("perplexity", ppl)
-
-    # ==================================================
-    # Utilities
-    # ==================================================
-
-    def __contains__(self, name):
-
-        return name in self.metrics
-
-    # --------------------------------------------------
-
-    def __repr__(self):
-
-        metrics = self.get_all()
-
-        parts = []
-
-        for name, value in metrics.items():
-
-            if isinstance(value, float):
-                parts.append(f"{name}: {value:.4f}")
-            else:
-                parts.append(f"{name}: {value}")
-
-        return " | ".join(parts)
+        self.update("perplexity", perplexity(loss))

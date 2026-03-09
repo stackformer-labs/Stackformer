@@ -8,8 +8,7 @@ from tqdm import tqdm
 from stackformer.utils.utils import is_main_process
 
 
-def train_loop(engine, dataloader, epoch: int) -> None:
-    """Run one training epoch."""
+def train_epoch(engine, dataloader, epoch: int) -> None:
     if dataloader is None:
         raise ValueError("train dataloader must not be None")
 
@@ -25,7 +24,7 @@ def train_loop(engine, dataloader, epoch: int) -> None:
     if show_progress:
         iterator = tqdm(iterator, total=len(dataloader), desc=f"Train Epoch {epoch}")
 
-    for batch_idx, batch in iterator:
+    for _, batch in iterator:
         if engine.reached_max_train_steps():
             break
 
@@ -36,13 +35,10 @@ def train_loop(engine, dataloader, epoch: int) -> None:
                 display_metrics["loss"] = f"{metrics['loss']:.4f}"
             if "lr" in metrics and metrics["lr"] is not None:
                 display_metrics["lr"] = f"{metrics['lr']:.2e}"
-            if "step_time" in metrics:
-                display_metrics["step"] = f"{metrics['step_time']:.3f}s"
             iterator.set_postfix(display_metrics)
 
 
-def validation_loop(engine, dataloader, epoch: int) -> None:
-    """Run one validation epoch."""
+def eval_epoch(engine, dataloader, epoch: int) -> None:
     if dataloader is None:
         raise ValueError("validation dataloader must not be None")
 
@@ -59,7 +55,21 @@ def validation_loop(engine, dataloader, epoch: int) -> None:
         for batch_idx, batch in iterator:
             if max_eval_steps is not None and batch_idx >= int(max_eval_steps):
                 break
-
             metrics = engine._eval_step(batch)
             if show_progress and metrics and "val_loss" in metrics:
                 iterator.set_postfix({"val_loss": f"{metrics['val_loss']:.4f}"})
+
+
+def predict_loop(engine, dataloader):
+    outputs = []
+    engine.state.model.eval()
+    with torch.no_grad():
+        for batch in dataloader:
+            inputs, _ = engine._prepare_batch(batch)
+            outputs.append(engine._forward_model(inputs))
+    return outputs
+
+
+# Backwards compatibility aliases
+train_loop = train_epoch
+validation_loop = eval_epoch
