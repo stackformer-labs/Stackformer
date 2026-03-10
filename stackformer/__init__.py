@@ -33,12 +33,6 @@ TokenizerImportError: Exception | None = None
 TrainerImportError: Exception | None = None
 
 try:
-    from .modules import Embedding_using_tiktoken
-except Exception as exc:  # optional dependency: tiktoken
-    TokenizerImportError = exc
-    Embedding_using_tiktoken = None  # type: ignore[assignment]
-
-try:
     from .engine import Trainer
 except Exception as exc:
     TrainerImportError = exc
@@ -80,7 +74,5 @@ __all__ = [
     "transformer",
 ]
 
-if Embedding_using_tiktoken is not None:
-    __all__.append("Embedding_using_tiktoken")
 if Trainer is not None:
     __all__.append("Trainer")
