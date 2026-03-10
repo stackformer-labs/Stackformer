@@ -6,7 +6,9 @@
   <a href="https://pypi.org/project/stackformer/"><img src="https://img.shields.io/pypi/v/stackformer.svg" alt="PyPI version" /></a>
   <a href="https://pypi.org/project/stackformer/"><img src="https://img.shields.io/pypi/pyversions/stackformer.svg" alt="Python versions" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License" /></a>
-  <a href="https://github.com/Gurumurthy30/Stackformer/actions"><img src="https://img.shields.io/github/actions/workflow/status/Gurumurthy30/Stackformer/python-package.yml?label=CI" alt="CI status" /></a>
+  <a href="https://github.com/Gurumurthy30/Stackformer/actions">
+    <img src="https://img.shields.io/github/actions/workflow/status/Gurumurthy30/Stackformer/core-tests.yml?branch=main&label=CI" alt="CI status" />
+  </a>
 </p>
 
 # StackFormer
@@ -32,17 +34,10 @@ StackFormer is designed for fast experimentation with reusable Transformer build
 ```text
 Stackformer/
 ├── assets/
-│   ├── logo.png
-│   └── logo_black.png
 ├── docs/
 │   ├── user_docs/
-│   │   └── installation.md
 │   └── developer_docs/
-│       └── architecture.md
 ├── examples/
-│   ├── simple_train.py
-│   ├── simple_trainer_v2.py
-│   └── train_ddp.py
 ├── stackformer/
 │   ├── __init__.py
 │   ├── generate.py
@@ -76,7 +71,6 @@ Stackformer/
 │   │   ├── Masking.py
 │   │   ├── Normalization.py
 │   │   ├── position_embedding.py
-│   │   └── tokenizer.py
 │   ├── optim/
 │   │   ├── factories.py
 │   │   └── loss_fn.py
@@ -150,16 +144,6 @@ examples/train_ddp.py
 
 - User documentation: [docs/user_docs/installation.md](docs/user_docs/installation.md)
 - Developer documentation: [docs/developer_docs/architecture.md](docs/developer_docs/architecture.md)
-
-## Testing
-
-Run tests with:
-
-```bash
-pytest
-```
-
-All tests are validated in CI.
 
 ## Community
 
