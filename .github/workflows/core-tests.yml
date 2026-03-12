@@ -22,4 +22,4 @@ jobs:
           pip install .
           pip install pytest pytest-cov
       - name: Run module and utility tests
-        run: pytest tests/modules tests/utils
+        run: pytest -q --maxfail=1 tests/modules tests/utils

@@ -22,4 +22,4 @@ jobs:
           pip install .
           pip install pytest pytest-cov
       - name: Run integration tests
-        run: pytest tests/integration
+        run: pytest -q --maxfail=1 tests/integration
