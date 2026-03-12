@@ -30,7 +30,7 @@ stackformer/
 At a high level, model training composes:
 
 1. Model definition (`stackformer.models`, `stackformer.vision`, or custom modules)
-2. Engine/trainer orchestration (`stackformer.engine` and `stackformer.trainer`)
+2. Engine/trainer orchestration (`stackformer.engine.Trainer`)
 3. Optimization and scaling (`stackformer.optim`, `stackformer.amp`)
 4. Distributed execution (`stackformer.distributed`)
 5. Logging, metrics, and checkpoints (`stackformer.logging`, `stackformer.engine.checkpoint`)

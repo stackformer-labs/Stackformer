@@ -42,7 +42,6 @@ Stackformer/
 │   ├── __init__.py
 │   ├── generate.py
 │   ├── metrics.py
-│   ├── trainer.py
 │   ├── py.typed
 │   ├── amp/
 │   │   └── scaler.py

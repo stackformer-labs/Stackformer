@@ -30,14 +30,7 @@ from .modules import (
 )
 from .vision import SegFormerB0, ViT
 
-TokenizerImportError: Exception | None = None
-TrainerImportError: Exception | None = None
-
-try:
-    from .engine import Trainer
-except Exception as exc:
-    TrainerImportError = exc
-    Trainer = None  # type: ignore[assignment]
+from .engine import Trainer
 
 __all__ = [
     "AbsolutePositionEmbedding",
@@ -78,5 +71,4 @@ __all__ = [
     "TrainingConfig",
 ]
 
-if Trainer is not None:
-    __all__.append("Trainer")
+__all__.append("Trainer")
