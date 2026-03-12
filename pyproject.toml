@@ -1,14 +1,16 @@
 [project]
-name = "Stackformer"
+name = "stackformer"
 version = "0.1.8"
 description = "Modular transformer blocks built in PyTorch"
 readme = "README.md"
 requires-python = ">=3.10"
-license = "MIT"
+license = { text = "MIT" }
 
 authors = [
   { name = "Gurumurthy", email = "gurumurthy.00300@gmail.com" }
 ]
+
+keywords = ["transformer", "pytorch", "deep-learning", "attention", "llm", "machine-learning"]
 
 dependencies = [
   "torch>=2.0,<2.7",
@@ -20,6 +22,9 @@ dependencies = [
 
 classifiers = [
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
   "Typing :: Typed",
   "Operating System :: OS Independent",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -27,13 +32,10 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-test = [
-  "pytest>=8.0,<9.0",
-  "pytest-cov>=5.0,<6.0"
-]
 dev = [
   "pytest>=8.0,<9.0",
-  "pytest-cov>=5.0,<6.0"
+  "pytest-cov>=5.0,<6.0",
+  "build>=1.2,<2.0"
 ]
 
 [project.urls]
@@ -41,17 +43,18 @@ Repository = "https://github.com/Gurumurthy30/Stackformer"
 Releases = "https://github.com/Gurumurthy30/Stackformer/releases"
 Issue-Tracker = "https://github.com/Gurumurthy30/Stackformer/issues"
 Discussions = "https://github.com/Gurumurthy30/Stackformer/discussions"
+Documentation = "https://github.com/Gurumurthy30/Stackformer/tree/main/docs"
 
 [tool.setuptools.packages.find]
 include = ["stackformer*"]
 exclude = ["assets*"]
 
+[tool.setuptools.package-data]
+stackformer = ["py.typed"]
+
 [build-system]
 requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
-
-[tool.setuptools.package-data]
-stackformer = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
