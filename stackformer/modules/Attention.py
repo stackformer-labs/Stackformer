@@ -40,6 +40,57 @@ import torch.nn.functional as F
 from stackformer.modules.Masking import make_mask
 
 
+_ROPE_FREQ_CACHE: dict[tuple[int, int, str, torch.dtype], torch.Tensor] = {}
+
+
+def _normalize_mask_type(mask_type):
+    if mask_type is True:
+        return ["causal"]
+    if mask_type in (False, None):
+        return None
+    if isinstance(mask_type, str):
+        return [mask_type]
+    if isinstance(mask_type, (list, tuple)):
+        return list(mask_type)
+    raise TypeError("mask_type must be bool, str, or list of str")
+
+
+def _get_attention_mask(cache: dict, mask_type, seq_len: int, device, **mask_kwargs):
+    mask_types = _normalize_mask_type(mask_type)
+    if mask_types is None:
+        return None
+    key = (seq_len, tuple(mask_types), str(device))
+    if key not in cache:
+        cache[key] = make_mask(mask_types, seq_len, device=device, **mask_kwargs)
+    return cache[key]
+
+
+def _run_sdpa(q, k, v, attn_mask, dropout_p):
+    return F.scaled_dot_product_attention(
+        q,
+        k,
+        v,
+        attn_mask=attn_mask,
+        dropout_p=dropout_p,
+        is_causal=False,
+    )
+
+
+def _build_rope_frequency(head_dim: int, seq_len: int, device, dtype, theta: float = 10000.0) -> torch.Tensor:
+    assert head_dim % 2 == 0, "head_dim must be even for RoPE"
+    key = (head_dim, seq_len, str(device), dtype)
+    if key in _ROPE_FREQ_CACHE:
+        return _ROPE_FREQ_CACHE[key]
+
+    dim_half = head_dim // 2
+    inv_freq = 1.0 / (theta ** (torch.arange(0, dim_half, device=device, dtype=torch.float32) / dim_half))
+    pos = torch.arange(seq_len, device=device, dtype=torch.float32)
+    freqs = torch.outer(pos, inv_freq)
+    freq_complex = torch.polar(torch.ones_like(freqs), freqs)
+    _ROPE_FREQ_CACHE[key] = freq_complex
+    return freq_complex
+
+
 class Self_Attention(nn.Module):
     """Single-head causal/self attention.
 
@@ -95,35 +146,16 @@ class Self_Attention(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_mask(self, seq_len: int):
-        # Handle boolean mask coming from forward(mask=True)
-        if self.mask_type is True:
-            mask_types = ["causal"]
-        elif self.mask_type in (False, None):
-            return None
-        elif isinstance(self.mask_type, str):
-            mask_types = [self.mask_type]
-        elif isinstance(self.mask_type, (list, tuple)):
-            mask_types = list(self.mask_type)
-        else:
-            raise TypeError("mask_type must be bool, str, or list of str")
-        
-        # Hashable cache key
-        key = (seq_len, tuple(mask_types))
-
-        if key not in self._causal_mask_cache:
-            mask = make_mask(
-                self.mask_type,
-                seq_len,
-                device=self.device,
-                **self.mask_kwargs
-            )
-            self._causal_mask_cache[key] = mask
-
-        return self._causal_mask_cache[key]
+        return _get_attention_mask(
+            self._causal_mask_cache,
+            self.mask_type,
+            seq_len,
+            self.device,
+            **self.mask_kwargs,
+        )
 
     def forward(self, x, mask=True):
         B, T, C = x.shape
-        x = x.to(device=self.device, dtype=self.dtype)
 
         # Project Q, K, V
         q = self.q_proj(x)
@@ -139,11 +171,10 @@ class Self_Attention(nn.Module):
         if mask:
             attn_mask = self._get_or_create_mask(T)
 
-        out = F.scaled_dot_product_attention(
+        out = _run_sdpa(
             q,k,v,
             attn_mask=attn_mask,
-            dropout_p=self.dropout_p,
-            is_causal=False)
+            dropout_p=self.dropout_p)
 
         # Remove head dimension
         out = out.squeeze(1)  # (B, T, C)
@@ -210,35 +241,16 @@ class Multi_Head_Attention(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_mask(self, seq_len: int):
-        # Handle boolean mask coming from forward(mask=True)
-        if self.mask_type is True:
-            mask_types = ["causal"]
-        elif self.mask_type in (False, None):
-            return None
-        elif isinstance(self.mask_type, str):
-            mask_types = [self.mask_type]
-        elif isinstance(self.mask_type, (list, tuple)):
-            mask_types = list(self.mask_type)
-        else:
-            raise TypeError("mask_type must be bool, str, or list of str")
-        
-        # Hashable cache key
-        key = (seq_len, tuple(mask_types))
-
-        if key not in self._causal_mask_cache:
-            mask = make_mask(
-                self.mask_type,
-                seq_len,
-                device=self.device,
-                **self.mask_kwargs
-            )
-            self._causal_mask_cache[key] = mask
-
-        return self._causal_mask_cache[key]
+        return _get_attention_mask(
+            self._causal_mask_cache,
+            self.mask_type,
+            seq_len,
+            self.device,
+            **self.mask_kwargs,
+        )
 
     def forward(self, x, mask=True):
         B, T, C = x.shape
-        x = x.to(device=self.device, dtype=self.dtype)
 
         q = self.q_proj(x)  # (B, T, C)
         k = self.k_proj(x) 
@@ -256,11 +268,10 @@ class Multi_Head_Attention(nn.Module):
         if mask:
             causal_mask = self._get_or_create_mask(T)  # (T, T)
 
-        out = F.scaled_dot_product_attention(
+        out = _run_sdpa(
             q, k, v,
             attn_mask=causal_mask,
-            dropout_p=self.dropout_p,
-            is_causal=False
+            dropout_p=self.dropout_p
         )
         
         out = out.transpose(1, 2).contiguous().view(B, T, C)
@@ -294,7 +305,7 @@ class Multi_Head_Attention_With_RoPE(nn.Module):
     Returns:
         torch.Tensor: ``(B, T, C)``.
     """
-    def __init__(self, embed_dim, num_heads, mask_type=['causal'], dropout=0.0,  qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, num_heads, dropout=0.0, mask_type=['causal'], qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
 
@@ -322,42 +333,16 @@ class Multi_Head_Attention_With_RoPE(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_mask(self, seq_len: int):
-        # Handle boolean mask coming from forward(mask=True)
-        if self.mask_type is True:
-            mask_types = ["causal"]
-        elif self.mask_type in (False, None):
-            return None
-        elif isinstance(self.mask_type, str):
-            mask_types = [self.mask_type]
-        elif isinstance(self.mask_type, (list, tuple)):
-            mask_types = list(self.mask_type)
-        else:
-            raise TypeError("mask_type must be bool, str, or list of str")
-        
-        # Hashable cache key
-        key = (seq_len, tuple(mask_types))
-
-        if key not in self._causal_mask_cache:
-            mask = make_mask(
-                self.mask_type,
-                seq_len,
-                device=self.device,
-                **self.mask_kwargs
-            )
-            self._causal_mask_cache[key] = mask
-
-        return self._causal_mask_cache[key]
+        return _get_attention_mask(
+            self._causal_mask_cache,
+            self.mask_type,
+            seq_len,
+            self.device,
+            **self.mask_kwargs,
+        )
     
     def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, theta: float = 10000.0):
-        assert head_dim % 2 == 0, "head_dim must be even for RoPE"
-
-        dim_half = head_dim // 2
-        inv_freq = 1.0 / (theta ** (torch.arange(0, dim_half, device=self.device) / dim_half))
-        pos = torch.arange(seq_len, device=self.device)
-        freqs = torch.outer(pos, inv_freq)  # (seq_len, dim_half)
-
-        freq_complex = torch.polar(torch.ones_like(freqs), freqs)
-        return freq_complex  # (seq_len, dim_half)
+        return _build_rope_frequency(head_dim, seq_len, self.device, self.dtype, theta=theta)
 
     def _apply_rotary_position_embedding(self, x: torch.Tensor, freq_complex: torch.Tensor):
         B, H, T, D = x.shape
@@ -374,7 +359,6 @@ class Multi_Head_Attention_With_RoPE(nn.Module):
     
     def forward(self, x, mask=True):
         B, T, C = x.shape
-        x = x.to(device=self.device, dtype=self.dtype)
 
         q = self.q_proj(x)  # (B, T, C)
         k = self.k_proj(x) 
@@ -395,11 +379,10 @@ class Multi_Head_Attention_With_RoPE(nn.Module):
         if mask:
             causal_mask = self._get_or_create_mask(T)  # (T, T)
 
-        out = F.scaled_dot_product_attention(
+        out = _run_sdpa(
             q, k, v,
             attn_mask=causal_mask,
-            dropout_p=self.dropout_p,
-            is_causal=False
+            dropout_p=self.dropout_p
         )
         
         out = out.transpose(1, 2).contiguous().view(B, T, C)
@@ -429,7 +412,7 @@ class Cross_MultiHead_Attention(nn.Module):
     Returns:
         torch.Tensor: ``(B, T, C)``.
     """
-    def __init__(self, embed_dim, num_heads, mask_type=['causal'],dropout=0.0, qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, num_heads, dropout=0.0, mask_type=['causal'], qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
 
@@ -457,39 +440,19 @@ class Cross_MultiHead_Attention(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_mask(self, seq_len: int):
-        # Handle boolean mask coming from forward(mask=True)
-        if self.mask_type is True:
-            mask_types = ["causal"]
-        elif self.mask_type in (False, None):
-            return None
-        elif isinstance(self.mask_type, str):
-            mask_types = [self.mask_type]
-        elif isinstance(self.mask_type, (list, tuple)):
-            mask_types = list(self.mask_type)
-        else:
-            raise TypeError("mask_type must be bool, str, or list of str")
-        
-        # Hashable cache key
-        key = (seq_len, tuple(mask_types))
+        return _get_attention_mask(
+            self._causal_mask_cache,
+            self.mask_type,
+            seq_len,
+            self.device,
+            **self.mask_kwargs,
+        )
 
-        if key not in self._causal_mask_cache:
-            mask = make_mask(
-                self.mask_type,
-                seq_len,
-                device=self.device,
-                **self.mask_kwargs
-            )
-            self._causal_mask_cache[key] = mask
-
-        return self._causal_mask_cache[key]
-
-    def forward(self, x, context, mask=True):
+    def forward(self, x, context, mask=False, attn_mask: torch.Tensor | None = None):
         B, T, C = x.shape
         S = context.size(1)  # Length of context sequence
 
         # Move inputs to the correct device and dtype
-        x = x.to(device=self.device, dtype=self.dtype)
-        context = context.to(device=self.device, dtype=self.dtype)
 
         # Compute Q from x, and K/V from context
         q = self.q_proj(x)  # (B, T, C)
@@ -501,16 +464,21 @@ class Cross_MultiHead_Attention(nn.Module):
         k = k.view(B, S, self.num_heads, self.head_dim).transpose(1, 2)  # (B, num_heads, S, head_dim)
         v = v.view(B, S, self.num_heads, self.head_dim).transpose(1, 2)  # (B, num_heads, S, head_dim)
 
-        causal_mask = None
-        # Apply causal mask if needed
-        if mask:
-            causal_mask = self._get_or_create_mask(T)  # (T, T)
+        if attn_mask is not None:
+            if attn_mask.dim() == 2 and attn_mask.shape != (T, S):
+                raise ValueError(f"Cross attention mask must have shape (T, S)=({T}, {S}); got {tuple(attn_mask.shape)}")
+            causal_mask = attn_mask
+        elif mask:
+            if T != S:
+                raise ValueError("Causal cross-attention mask requires T == S. Provide explicit attn_mask with shape (T, S).")
+            causal_mask = self._get_or_create_mask(T)
+        else:
+            causal_mask = None
 
-        out = F.scaled_dot_product_attention(
+        out = _run_sdpa(
             q, k, v,
             attn_mask=causal_mask,
-            dropout_p=self.dropout_p,
-            is_causal=False
+            dropout_p=self.dropout_p
         )
         
         out = out.transpose(1, 2).contiguous().view(B, T, C)
@@ -539,7 +507,7 @@ class Multi_query_Attention(nn.Module):
     Returns:
         torch.Tensor: ``(B, T, C)``.
     """
-    def __init__(self, embed_dim, num_heads, mask_type=['causal'], dropout=0.0, qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, num_heads, dropout=0.0, mask_type=['causal'], qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
 
@@ -567,35 +535,16 @@ class Multi_query_Attention(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_mask(self, seq_len: int):
-        # Handle boolean mask coming from forward(mask=True)
-        if self.mask_type is True:
-            mask_types = ["causal"]
-        elif self.mask_type in (False, None):
-            return None
-        elif isinstance(self.mask_type, str):
-            mask_types = [self.mask_type]
-        elif isinstance(self.mask_type, (list, tuple)):
-            mask_types = list(self.mask_type)
-        else:
-            raise TypeError("mask_type must be bool, str, or list of str")
-        
-        # Hashable cache key
-        key = (seq_len, tuple(mask_types))
-
-        if key not in self._causal_mask_cache:
-            mask = make_mask(
-                self.mask_type,
-                seq_len,
-                device=self.device,
-                **self.mask_kwargs
-            )
-            self._causal_mask_cache[key] = mask
-
-        return self._causal_mask_cache[key]
+        return _get_attention_mask(
+            self._causal_mask_cache,
+            self.mask_type,
+            seq_len,
+            self.device,
+            **self.mask_kwargs,
+        )
 
     def forward(self, x, mask=True):
         B, T, C = x.shape
-        x = x.to(device=self.device, dtype=self.q_proj.weight.dtype)
 
         # Project input to queries (multi-head) and shared keys/values (single head)
         q = self.q_proj(x)  # (B, T, C)
@@ -615,11 +564,10 @@ class Multi_query_Attention(nn.Module):
         if mask:
             causal_mask = self._get_or_create_mask(T)  # (T, T)
 
-        out = F.scaled_dot_product_attention(
+        out = _run_sdpa(
             q, k, v,
             attn_mask=causal_mask,
-            dropout_p=self.dropout_p,
-            is_causal=False
+            dropout_p=self.dropout_p
         )
         
         out = out.transpose(1, 2).contiguous().view(B, T, C)
@@ -647,7 +595,7 @@ class Multi_query_Attention_With_RoPE(nn.Module):
     Returns:
         torch.Tensor: ``(B, T, C)``.
     """
-    def __init__(self, embed_dim, num_heads, mask_type=['causal'],dropout=0.0, qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, num_heads, dropout=0.0, mask_type=['causal'], qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
 
@@ -675,42 +623,16 @@ class Multi_query_Attention_With_RoPE(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_mask(self, seq_len: int):
-        # Handle boolean mask coming from forward(mask=True)
-        if self.mask_type is True:
-            mask_types = ["causal"]
-        elif self.mask_type in (False, None):
-            return None
-        elif isinstance(self.mask_type, str):
-            mask_types = [self.mask_type]
-        elif isinstance(self.mask_type, (list, tuple)):
-            mask_types = list(self.mask_type)
-        else:
-            raise TypeError("mask_type must be bool, str, or list of str")
-        
-        # Hashable cache key
-        key = (seq_len, tuple(mask_types))
-
-        if key not in self._causal_mask_cache:
-            mask = make_mask(
-                self.mask_type,
-                seq_len,
-                device=self.device,
-                **self.mask_kwargs
-            )
-            self._causal_mask_cache[key] = mask
-
-        return self._causal_mask_cache[key]
+        return _get_attention_mask(
+            self._causal_mask_cache,
+            self.mask_type,
+            seq_len,
+            self.device,
+            **self.mask_kwargs,
+        )
     
     def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, theta: float = 10000.0):
-        assert head_dim % 2 == 0, "head_dim must be even for RoPE"
-
-        dim_half = head_dim // 2
-        inv_freq = 1.0 / (theta ** (torch.arange(0, dim_half, device=self.device) / dim_half))
-        pos = torch.arange(seq_len, device=self.device)
-        freqs = torch.outer(pos, inv_freq)  # (seq_len, dim_half)
-
-        freq_complex = torch.polar(torch.ones_like(freqs), freqs)
-        return freq_complex  # (seq_len, dim_half)
+        return _build_rope_frequency(head_dim, seq_len, self.device, self.dtype, theta=theta)
 
     def _apply_rotary_position_embedding(self, x: torch.Tensor, freq_complex: torch.Tensor):
         B, H, T, D = x.shape
@@ -727,7 +649,6 @@ class Multi_query_Attention_With_RoPE(nn.Module):
     
     def forward(self, x, mask=True):
         B, T, C = x.shape
-        x = x.to(device=self.device, dtype=self.q_proj.weight.dtype)
 
         # Project input to queries (multi-head) and shared keys/values (single head)
         q = self.q_proj(x)  # (B, T, C)
@@ -751,11 +672,10 @@ class Multi_query_Attention_With_RoPE(nn.Module):
         if mask:
             causal_mask = self._get_or_create_mask(T)  # (T, T)
 
-        out = F.scaled_dot_product_attention(
+        out = _run_sdpa(
             q, k, v,
             attn_mask=causal_mask,
-            dropout_p=self.dropout_p,
-            is_causal=False
+            dropout_p=self.dropout_p
         )
 
         out = out.transpose(1, 2).contiguous().view(B, T, C)
@@ -783,7 +703,7 @@ class Group_query_Attention(nn.Module):
     Returns:
         torch.Tensor: ``(B, T, C)``.
     """
-    def __init__(self, embed_dim, num_query_heads, num_kv_heads, qkv_bias=False, mask_type=['causal'],dropout=0.0, device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, num_query_heads, num_kv_heads, qkv_bias=False, dropout=0.0, mask_type=['causal'], device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         assert embed_dim % num_query_heads == 0, "embed_dim must be divisible by num_query_heads"
         assert num_query_heads % num_kv_heads == 0, "num_query_heads must be divisible by num_kv_heads"
@@ -813,35 +733,16 @@ class Group_query_Attention(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_mask(self, seq_len: int):
-        # Handle boolean mask coming from forward(mask=True)
-        if self.mask_type is True:
-            mask_types = ["causal"]
-        elif self.mask_type in (False, None):
-            return None
-        elif isinstance(self.mask_type, str):
-            mask_types = [self.mask_type]
-        elif isinstance(self.mask_type, (list, tuple)):
-            mask_types = list(self.mask_type)
-        else:
-            raise TypeError("mask_type must be bool, str, or list of str")
-        
-        # Hashable cache key
-        key = (seq_len, tuple(mask_types))
-
-        if key not in self._causal_mask_cache:
-            mask = make_mask(
-                self.mask_type,
-                seq_len,
-                device=self.device,
-                **self.mask_kwargs
-            )
-            self._causal_mask_cache[key] = mask
-
-        return self._causal_mask_cache[key]
+        return _get_attention_mask(
+            self._causal_mask_cache,
+            self.mask_type,
+            seq_len,
+            self.device,
+            **self.mask_kwargs,
+        )
 
     def forward(self, x, mask=True):
         B, T, C = x.shape
-        x = x.to(device=self.device, dtype=self.q_proj.weight.dtype)
 
         # Project Q, K, V
         q = self.q_proj(x)  # (B, T, C)
@@ -862,11 +763,10 @@ class Group_query_Attention(nn.Module):
         if mask:
             causal_mask = self._get_or_create_mask(T)  # (T, T)
 
-        out = F.scaled_dot_product_attention(
+        out = _run_sdpa(
             q, k, v,
             attn_mask=causal_mask,
-            dropout_p=self.dropout_p,
-            is_causal=False
+            dropout_p=self.dropout_p
         )
 
         out = out.transpose(1, 2).contiguous().view(B, T, C)
@@ -897,7 +797,7 @@ class Group_query_Attention_With_RoPE(nn.Module):
     Returns:
         torch.Tensor: ``(B, T, C)``.
     """
-    def __init__(self, embed_dim, num_query_heads, num_kv_heads, qkv_bias=False, mask_type=['causal'], dropout=0.0, device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, num_query_heads, num_kv_heads, qkv_bias=False, dropout=0.0, mask_type=['causal'], device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         assert embed_dim % num_query_heads == 0, "embed_dim must be divisible by num_query_heads"
         assert num_query_heads % num_kv_heads == 0, "num_query_heads must be divisible by num_kv_heads"
@@ -927,42 +827,16 @@ class Group_query_Attention_With_RoPE(nn.Module):
         self._causal_mask_cache = {}
 
     def _get_or_create_mask(self, seq_len: int):
-        # Handle boolean mask coming from forward(mask=True)
-        if self.mask_type is True:
-            mask_types = ["causal"]
-        elif self.mask_type in (False, None):
-            return None
-        elif isinstance(self.mask_type, str):
-            mask_types = [self.mask_type]
-        elif isinstance(self.mask_type, (list, tuple)):
-            mask_types = list(self.mask_type)
-        else:
-            raise TypeError("mask_type must be bool, str, or list of str")
-        
-        # Hashable cache key
-        key = (seq_len, tuple(mask_types))
-
-        if key not in self._causal_mask_cache:
-            mask = make_mask(
-                self.mask_type,
-                seq_len,
-                device=self.device,
-                **self.mask_kwargs
-            )
-            self._causal_mask_cache[key] = mask
-
-        return self._causal_mask_cache[key]
+        return _get_attention_mask(
+            self._causal_mask_cache,
+            self.mask_type,
+            seq_len,
+            self.device,
+            **self.mask_kwargs,
+        )
     
     def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, theta: float = 10000.0):
-        assert head_dim % 2 == 0, "head_dim must be even for RoPE"
-
-        dim_half = head_dim // 2
-        inv_freq = 1.0 / (theta ** (torch.arange(0, dim_half, device=self.device) / dim_half))
-        pos = torch.arange(seq_len, device=self.device)
-        freqs = torch.outer(pos, inv_freq)  # (seq_len, dim_half)
-
-        freq_complex = torch.polar(torch.ones_like(freqs), freqs)
-        return freq_complex  # (seq_len, dim_half)
+        return _build_rope_frequency(head_dim, seq_len, self.device, self.dtype, theta=theta)
 
     def _apply_rotary_position_embedding(self, x: torch.Tensor, freq_complex: torch.Tensor):
         B, H, T, D = x.shape
@@ -979,7 +853,6 @@ class Group_query_Attention_With_RoPE(nn.Module):
     
     def forward(self, x, mask=True):
         B, T, C = x.shape
-        x = x.to(device=self.device, dtype=self.q_proj.weight.dtype)
 
         # Project Q, K, V
         q = self.q_proj(x)  # (B, T, C)
@@ -1004,11 +877,10 @@ class Group_query_Attention_With_RoPE(nn.Module):
         if mask:
             causal_mask = self._get_or_create_mask(T)  # (T, T)
 
-        out = F.scaled_dot_product_attention(
+        out = _run_sdpa(
             q, k, v,
             attn_mask=causal_mask,
-            dropout_p=self.dropout_p,
-            is_causal=False
+            dropout_p=self.dropout_p
         )
         
         out = out.transpose(1, 2).contiguous().view(B, T, C)
@@ -1080,15 +952,7 @@ class kv_cache_multihead(nn.Module):
         return self._causal_mask_cache[key]
 
     def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, theta: float = 10000.0):
-        assert head_dim % 2 == 0, "head_dim must be even for RoPE"
-
-        dim_half = head_dim // 2
-        inv_freq = 1.0 / (theta ** (torch.arange(0, dim_half, device=self.device) / dim_half))
-        pos = torch.arange(seq_len, device=self.device)
-        freqs = torch.outer(pos, inv_freq)  # (seq_len, dim_half)
-
-        freq_complex = torch.polar(torch.ones_like(freqs), freqs)
-        return freq_complex  # (seq_len, dim_half)
+        return _build_rope_frequency(head_dim, seq_len, self.device, self.dtype, theta=theta)
 
     def _apply_rotary_position_embedding(self, x: torch.Tensor, freq_complex: torch.Tensor):
         B, H, T, D = x.shape
@@ -1148,13 +1012,12 @@ class kv_cache_multihead(nn.Module):
             attn_mask = self._get_or_create_kv_mask(T, end_pos, start_pos)
 
         # Scaled Dot Product Attention (Flash / MemEff)        
-        context = F.scaled_dot_product_attention(
+        context = _run_sdpa(
             q,
             k_full,
             v_full,
             attn_mask=attn_mask,   # (T, S)
-            dropout_p=self.dropout_p,
-            is_causal=False
+            dropout_p=self.dropout_p
         )
 
         # Merge heads + output projection        
@@ -1230,13 +1093,7 @@ class kv_cache_group_query(nn.Module):
         return self._causal_mask_cache[key]
 
     def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, theta: float = 10000.0):
-        assert head_dim % 2 == 0, "head_dim must be even for RoPE"
-        dim_half = head_dim // 2
-        inv_freq = 1.0 / (theta ** (torch.arange(0, dim_half, device=self.device) / dim_half))
-        pos = torch.arange(seq_len, device=self.device)
-        freqs = torch.outer(pos, inv_freq)  # (seq_len, dim_half)
-        freq_complex = torch.polar(torch.ones_like(freqs), freqs)  # magnitude=1, angle=freqs
-        return freq_complex  # (seq_len, dim_half)
+        return _build_rope_frequency(head_dim, seq_len, self.device, self.dtype, theta=theta)
 
     def _apply_rotary_position_embedding(self, x: torch.Tensor, freq_complex: torch.Tensor):
         B, H, T, D = x.shape
@@ -1251,7 +1108,6 @@ class kv_cache_group_query(nn.Module):
 
     def forward(self, x, start_pos, mask=True, rope=True):
         B, T, C = x.shape
-        x = x.to(device=self.device, dtype=self.q_proj.weight.dtype)
 
         # Project Q, K, V
         q = self.q_proj(x)
@@ -1298,13 +1154,12 @@ class kv_cache_group_query(nn.Module):
             attn_mask = self._get_or_create_kv_mask(T, end_pos, start_pos)
 
         # SDPA
-        context = F.scaled_dot_product_attention(
+        context = _run_sdpa(
             q,
             k_full,
             v_full,
             attn_mask=attn_mask,
-            dropout_p=self.dropout_p,
-            is_causal=False
+            dropout_p=self.dropout_p
         )
 
         # Merge heads

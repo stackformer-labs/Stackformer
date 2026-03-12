@@ -17,7 +17,13 @@ from stackformer.generate import text_generate
 class llama_1_Block(nn.Module):
     def __init__(self, embed_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
-        self.attention = Multi_Head_Attention_With_RoPE(embed_dim, num_heads, dropout, device=device, dtype=dtype)
+        self.attention = Multi_Head_Attention_With_RoPE(
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+            device=device,
+            dtype=dtype,
+        )
         self.norm1 = RMSNormalization(embed_dim, eps=eps, device=device,dtype=dtype)
         self.FF_SwiGLU = FF_SwiGLU(embed_dim, hidden_dim, dropout, device=device, dtype=dtype)
         self.norm2 = RMSNormalization(embed_dim, eps=eps, device=device,dtype=dtype)
