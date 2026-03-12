@@ -8,6 +8,7 @@ import torch
 from torch.utils.data import DataLoader, Subset
 
 from stackformer.amp import initialize_scaler
+from stackformer.config import TrainingConfig
 from stackformer.distributed.ddp import init_distributed, is_distributed, wrap_model_ddp
 from stackformer.engine.checkpoint import CheckpointManager
 from stackformer.engine.engine import Engine
@@ -87,6 +88,7 @@ class Trainer:
         total_steps: Optional[int] = None,
         max_steps: Optional[int] = None,
         max_eval_step: Optional[int] = None,
+        training_config: Optional[TrainingConfig] = None,
     ):
         if model is None:
             raise ValueError("`model` must be provided.")
@@ -100,13 +102,29 @@ class Trainer:
 
         self.device = device
         self.seed = seed
-        self.max_epochs = int(max_epochs)
-        self.max_train_steps = max_train_steps if max_train_steps is not None else max_steps
-        self.max_eval_steps = max_eval_steps if max_eval_steps is not None else max_eval_step
-        self.eval_every_n_epochs = max(1, int(eval_every_n_epochs))
-        self.save_every_n_epochs = max(1, int(save_every_n_epochs))
-        self.grad_accumulation_step = max(1, int(grad_accumulation_step))
-        self.max_grad_norm = max_grad_norm
+        cfg = training_config or TrainingConfig(
+            max_epochs=max_epochs,
+            max_train_steps=max_train_steps if max_train_steps is not None else max_steps,
+            max_eval_steps=max_eval_steps if max_eval_steps is not None else max_eval_step,
+            eval_every_n_epochs=eval_every_n_epochs,
+            save_every_n_epochs=save_every_n_epochs,
+            grad_accumulation_step=grad_accumulation_step,
+            max_grad_norm=max_grad_norm,
+            lr=lr,
+            weight_decay=weight_decay,
+            optimizer_name=optimizer_name,
+            scheduler_name=scheduler_name,
+            warmup_steps=warmup_steps,
+            total_steps=total_steps,
+        )
+
+        self.max_epochs = int(cfg.max_epochs)
+        self.max_train_steps = cfg.max_train_steps
+        self.max_eval_steps = cfg.max_eval_steps
+        self.eval_every_n_epochs = max(1, int(cfg.eval_every_n_epochs))
+        self.save_every_n_epochs = max(1, int(cfg.save_every_n_epochs))
+        self.grad_accumulation_step = max(1, int(cfg.grad_accumulation_step))
+        self.max_grad_norm = cfg.max_grad_norm
         self.monitor = monitor
         self.use_amp = bool(use_amp)
         self.scaler = scaler
@@ -115,12 +133,12 @@ class Trainer:
         self.resume_from = resume_from
         self.checkpoint_dir = checkpoint_dir
 
-        self.lr = lr
-        self.weight_decay = weight_decay
-        self.optimizer_name = optimizer_name
-        self.scheduler_name = scheduler_name
-        self.warmup_steps = warmup_steps
-        self.total_steps = total_steps
+        self.lr = cfg.lr
+        self.weight_decay = cfg.weight_decay
+        self.optimizer_name = cfg.optimizer_name
+        self.scheduler_name = cfg.scheduler_name
+        self.warmup_steps = cfg.warmup_steps
+        self.total_steps = cfg.total_steps
 
         self._setup_seed()
         self._setup_distributed()

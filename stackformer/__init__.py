@@ -1,6 +1,7 @@
 """Top-level public API for Stackformer."""
 
 from .generate import text_generate
+from .config import GenerationConfig, ModelConfig, TrainingConfig
 from .models import GPT_1, GPT_2, gemma_1_2b, gemma_1_7b, llama_1, llama_2, transformer
 from .modules import (
     AbsolutePositionEmbedding,
@@ -72,6 +73,9 @@ __all__ = [
     "make_mask",
     "text_generate",
     "transformer",
+    "GenerationConfig",
+    "ModelConfig",
+    "TrainingConfig",
 ]
 
 if Trainer is not None:

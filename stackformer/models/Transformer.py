@@ -17,7 +17,13 @@ from stackformer.modules.Normalization import LayerNormalization
 class Encoder(nn.Module):
     def __init__(self, embed_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
-        self.attention = Multi_Head_Attention(embed_dim, num_heads, dropout, device=device, dtype=dtype)
+        self.attention = Multi_Head_Attention(
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+            device=device,
+            dtype=dtype,
+        )
         self.norm1 = LayerNormalization(embed_dim, eps=eps, device=device, dtype=dtype)
         self.ff_relu = FF_ReLU(embed_dim, hidden_dim, dropout, device=device, dtype=dtype)
         self.norm2 = LayerNormalization(embed_dim, eps=eps, device=device, dtype=dtype)
@@ -38,9 +44,21 @@ class Encoder(nn.Module):
 class Decoder(nn.Module):
     def __init__(self, embed_dim, num_heads, dropout, hidden_dim, eps=1e-5, device='cpu', dtype=torch.float32):
         super().__init__()
-        self.attention = Multi_Head_Attention(embed_dim, num_heads, dropout, device=device, dtype=dtype)
+        self.attention = Multi_Head_Attention(
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+            device=device,
+            dtype=dtype,
+        )
         self.norm1 = LayerNormalization(embed_dim, eps=eps, device=device, dtype=dtype)
-        self.cross_attention = Cross_MultiHead_Attention(embed_dim, num_heads, dropout, device=device, dtype=dtype)
+        self.cross_attention = Cross_MultiHead_Attention(
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+            device=device,
+            dtype=dtype,
+        )
         self.norm2 = LayerNormalization(embed_dim, eps=eps, device=device, dtype=dtype)
         self.ff_relu = FF_ReLU(embed_dim, hidden_dim, dropout, device=device, dtype=dtype)
         self.norm3 = LayerNormalization(embed_dim, eps=eps, device=device, dtype=dtype)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import Any, Dict, List
 
 from stackformer.logging.csv_logger import CSVLogger
@@ -23,6 +24,7 @@ class Logger:
         wandb_config: dict | None = None,
     ):
         self.backends: List[Any] = []
+        self._failed_backends: set[str] = set()
 
         if csv:
             self.backends.append(CSVLogger(log_dir=log_dir, filename=f"{experiment_name}_metrics.csv"))
@@ -47,10 +49,19 @@ class Logger:
         if not metrics:
             return
         for backend in self.backends:
+            backend_name = backend.__class__.__name__
+            if backend_name in self._failed_backends:
+                continue
             try:
                 backend.log(metrics)
-            except Exception:
-                pass
+            except Exception as exc:
+                if backend_name not in self._failed_backends:
+                    self._failed_backends.add(backend_name)
+                    warnings.warn(
+                        f"Logger backend '{backend_name}' failed and will be skipped: {exc}",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
 
     def close(self) -> None:
         for backend in self.backends:

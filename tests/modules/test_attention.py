@@ -138,3 +138,29 @@ def test_cross_attention_mismatched_batch_raises():
     ctx = torch.randn(1, 4, EMB)
     with pytest.raises(RuntimeError):
         layer(q, context=ctx)
+
+
+def test_cross_attention_accepts_explicit_t_s_mask():
+    layer = Cross_MultiHead_Attention(embed_dim=EMB, num_heads=HEADS, dropout=0.0)
+    q = torch.randn(BATCH, 4, EMB, requires_grad=True)
+    ctx = torch.randn(BATCH, 6, EMB)
+    mask = torch.zeros(4, 6, dtype=torch.bool)
+    out = layer(q, context=ctx, attn_mask=mask)
+    _assert_finite_and_grad(out, q)
+
+
+def test_cross_attention_invalid_mask_shape_raises():
+    layer = Cross_MultiHead_Attention(embed_dim=EMB, num_heads=HEADS, dropout=0.0)
+    q = torch.randn(BATCH, 4, EMB)
+    ctx = torch.randn(BATCH, 6, EMB)
+    bad_mask = torch.zeros(4, 4, dtype=torch.bool)
+    with pytest.raises(ValueError):
+        layer(q, context=ctx, attn_mask=bad_mask)
+
+
+def test_attention_constructors_allow_positional_dropout_safely():
+    x = torch.randn(1, 3, EMB)
+    # Historically some model blocks passed dropout positionally.
+    layer = Multi_Head_Attention_With_RoPE(EMB, HEADS, 0.0)
+    out = layer(x)
+    assert out.shape == x.shape
