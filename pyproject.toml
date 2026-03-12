@@ -1,6 +1,6 @@
 [project]
 name = "stackformer"
-version = "0.1.8"
+version = "0.1.9"
 description = "Modular transformer blocks built in PyTorch"
 readme = "README.md"
 requires-python = ">=3.10"
