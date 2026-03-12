@@ -1,15 +1,16 @@
+import pytest
 import torch
 
 from stackformer import llama_1
 from stackformer.models.Meta import llama_2
 
 
-def test_meta_models_forward():
+def test_llama_1_forward_grad_and_generate():
     torch.manual_seed(0)
-    vocab_size, seq_len, batch_size = 32, 6, 2
-    x = torch.randint(0, vocab_size, (batch_size, seq_len))
+    vocab_size, batch, seq_len = 32, 2, 6
+    x = torch.randint(0, vocab_size, (batch, seq_len))
 
-    l1 = llama_1(
+    model = llama_1(
         vocab_size=vocab_size,
         num_layers=1,
         embed_dim=8,
@@ -18,17 +19,55 @@ def test_meta_models_forward():
         dropout=0.0,
         hidden_dim=16,
     )
-    assert l1(x).shape == (batch_size, seq_len, vocab_size)
+    logits = model(x)
+    assert logits.shape == (batch, seq_len, vocab_size)
 
-    l2 = llama_2(
+    logits.mean().backward()
+    assert any(p.grad is not None for p in model.parameters())
+
+    generated = model.generate(x, max_context_len=seq_len, max_new_tokens=2)
+    assert generated.shape == (batch, seq_len + 2)
+
+
+def test_llama_2_forward_and_training_step():
+    torch.manual_seed(0)
+    vocab_size, batch, seq_len = 32, 2, 6
+    x = torch.randint(0, vocab_size, (batch, seq_len))
+
+    model = llama_2(
         vocab_size=vocab_size,
         num_layers=1,
         embed_dim=8,
         num_query_heads=2,
         num_kv_heads=1,
         kv_seq_len=seq_len,
-        batch_size=batch_size,
+        batch_size=batch,
         hidden_dim=16,
         dropout=0.0,
     )
-    assert l2(x).shape == (batch_size, seq_len, vocab_size)
+
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-2)
+    optimizer.zero_grad(set_to_none=True)
+    logits = model(x)
+    assert logits.shape == (batch, seq_len, vocab_size)
+    loss = logits.square().mean()
+    loss.backward()
+    optimizer.step()
+
+    assert torch.isfinite(logits).all()
+    assert torch.abs(logits).mean() < 100
+
+
+def test_llama_2_invalid_head_setup_raises():
+    with pytest.raises(AssertionError):
+        llama_2(
+            vocab_size=20,
+            num_layers=1,
+            embed_dim=8,
+            num_query_heads=3,
+            num_kv_heads=2,
+            kv_seq_len=4,
+            batch_size=1,
+            hidden_dim=16,
+            dropout=0.0,
+        )
