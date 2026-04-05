@@ -93,7 +93,7 @@ jobs:
           template["id"] = kernel_ref
           template["title"] = slug
           Path("kaggle-kernel/kernel-metadata.json").write_text(
-              json.dumps(template, indent=2) + "\\n",
+              json.dumps(template, indent=2) + "\n",
               encoding="utf-8",
           )
 
@@ -105,8 +105,8 @@ jobs:
 
           env_path = Path(os.environ["GITHUB_ENV"])
           with env_path.open("a", encoding="utf-8") as f:
-              f.write(f"KERNEL_REF={kernel_ref}\\n")
-              f.write(f"KERNEL_SLUG={slug}\\n")
+              f.write(f"KERNEL_REF={kernel_ref}\n")
+              f.write(f"KERNEL_SLUG={slug}\n")
 
           print(f"[gpu-ci] Prepared kernel: {kernel_ref}")
           print("[gpu-ci] Final kernel-metadata.json:")
