@@ -36,16 +36,8 @@ class gemma_1_2b_block(nn.Module):
         self.norm2 = RMSNormalization(embed_dim, eps=eps, device=device,dtype=dtype)
         
     def forward(self, x):
-        residual = x
-        x = self.norm1(x)
-        x = self.attention(x)
-        x = x + residual
-        
-        residual = x
-        x = self.norm2(x)
-        x = self.FF_SwiGLU(x)
-        x = x + residual
-        
+        x = x + self.attention(self.norm1(x))
+        x = x + self.FF_SwiGLU(self.norm2(x))
         return x
 
 # --- Decoder ---
@@ -148,16 +140,8 @@ class gemma_1_7b_block(nn.Module):
         self.norm2 = RMSNormalization(embed_dim, eps=eps, device=device,dtype=dtype)
         
     def forward(self, x):
-        residual = x
-        x = self.norm1(x)
-        x = self.attention(x)
-        x = x + residual
-        
-        residual = x
-        x = self.norm2(x)
-        x = self.FF_SwiGLU(x)
-        x = x + residual
-        
+        x = x + self.attention(self.norm1(x))
+        x = x + self.FF_SwiGLU(self.norm2(x))
         return x
     
 # --- Decoder ---

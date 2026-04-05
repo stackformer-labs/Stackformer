@@ -29,16 +29,8 @@ class llama_1_Block(nn.Module):
         self.norm2 = RMSNormalization(embed_dim, eps=eps, device=device,dtype=dtype)
         
     def forward(self, x):
-        residual = x
-        x = self.norm1(x)
-        x = self.attention(x)
-        x = x + residual
-        
-        residual = x
-        x = self.norm2(x)
-        x = self.FF_SwiGLU(x)
-        x = x + residual
-        
+        x = x + self.attention(self.norm1(x))
+        x = x + self.FF_SwiGLU(self.norm2(x))
         return x
 
 # --- Decoder ---
@@ -135,15 +127,8 @@ class llama_2_Block(nn.Module):
         self.ff = FF_SwiGLU(embed_dim=embed_dim, hidden_dim=hidden_dim, device=device, dtype=dtype)
 
     def forward(self, x, start_pos):
-        residual = x
-        x = self.attn_norm(x)
-        x = self.attn(x, start_pos, rope=True)
-        x = x + residual
-
-        residual = x
-        x = self.ff_norm(x)
-        x = self.ff(x)
-        x = x + residual
+        x = x + self.attn(self.attn_norm(x), start_pos, rope=True)
+        x = x + self.ff(self.ff_norm(x))
         return x
 
 class llama_2_Decoder(nn.Module):

@@ -6,6 +6,7 @@ research-aware documentation and practical usage examples.
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from stackformer.modules.Attention import Multi_Head_Attention
 from stackformer.modules.position_embedding import AbsolutePositionEmbedding
@@ -47,22 +48,14 @@ class GPT_1_Block(nn.Module):
             device=device,
             dtype=dtype,
         )
-
-        self.norm1 = LayerNormalization(embed_dim, eps=eps, device=device, dtype=dtype)
+        
+        self.norm1 = nn.LayerNorm(embed_dim, eps=eps, device=device, dtype=dtype)
         self.ff = FF_GELU(embed_dim, hidden_dim, dropout, device=device, dtype=dtype)
-        self.norm2 = LayerNormalization(embed_dim, eps=eps, device=device, dtype=dtype)
-
+        self.norm2 = nn.LayerNorm(embed_dim, eps=eps, device=device, dtype=dtype)
+        
     def forward(self, x):
-        residual = x
-        x = self.attention(x)
-        x = self.norm1(x)
-        x = x + residual
-
-        residual = x
-        x = self.ff(x)
-        x = self.norm2(x)
-        x = x + residual
-
+        x = self.norm1(x + self.attention(x))
+        x = self.norm2(x + self.ff(x))
         return x
 
 
@@ -176,7 +169,7 @@ class GPT_1(nn.Module):
             dtype=dtype,
         )
 
-        self.final_norm = LayerNormalization(embed_dim, eps=eps, device=device, dtype=dtype)
+        self.final_norm = nn.LayerNorm(embed_dim, eps=eps, device=device, dtype=dtype)
         self.lm_head = nn.Linear(embed_dim, vocab_size, bias=False, device=device, dtype=dtype)
 
     def forward(self, x):
@@ -224,21 +217,13 @@ class GPT_2_Block(nn.Module):
             dtype=dtype,
         )
 
-        self.norm1 = LayerNormalization(embed_dim, eps=eps, device=device, dtype=dtype)
+        self.norm1 = nn.LayerNorm(embed_dim, eps=eps, device=device, dtype=dtype)
         self.ff = FF_GELU(embed_dim, hidden_dim, dropout, device=device, dtype=dtype)
-        self.norm2 = LayerNormalization(embed_dim, eps=eps, device=device, dtype=dtype)
+        self.norm2 = nn.LayerNorm(embed_dim, eps=eps, device=device, dtype=dtype)
 
     def forward(self, x):
-        residual = x
-        x = self.norm1(x)
-        x = self.attention(x)
-        x = x + residual
-
-        residual = x
-        x = self.norm2(x)
-        x = self.ff(x)
-        x = x + residual
-
+        x = x + self.attention(self.norm1(x))
+        x = x + self.ff(self.norm2(x))
         return x
 
 
@@ -346,7 +331,7 @@ class GPT_2(nn.Module):
             dtype=dtype,
         )
 
-        self.final_norm = LayerNormalization(embed_dim, eps=eps, device=device, dtype=dtype)
+        self.final_norm = nn.LayerNorm(embed_dim, eps=eps, device=device, dtype=dtype)
         self.lm_head = nn.Linear(embed_dim, vocab_size, bias=False, device=device, dtype=dtype)
 
     def forward(self, x):
