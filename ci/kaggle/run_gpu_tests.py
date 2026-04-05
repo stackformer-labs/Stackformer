@@ -120,3 +120,4 @@ run(
 print("[gpu-ci] Running full pytest suite (CPU + GPU-marked tests).", flush=True)
 run(["pytest", "-q", "--maxfail=1"], cwd=SRC)
 print("[gpu-ci] ===== Stackformer GPU test execution succeeded =====", flush=True)
+pyproject.toml
