@@ -35,7 +35,15 @@ jobs:
           printf '%s' "$KAGGLE_JSON" > ~/.kaggle/kaggle.json
           chmod 600 ~/.kaggle/kaggle.json
 
-          python -c "import json, pathlib; creds=json.loads(pathlib.Path.home().joinpath('.kaggle','kaggle.json').read_text()); assert creds.get('username') and creds.get('key'), 'kaggle.json must contain non-empty username and key'; print('[gpu-ci] Kaggle credentials loaded for user:', creds['username'])"
+          python - <<'PY'
+import json
+from pathlib import Path
+kaggle_json = Path.home() / ".kaggle" / "kaggle.json"
+creds = json.loads(kaggle_json.read_text())
+if not creds.get("username") or not creds.get("key"):
+    raise SystemExit("kaggle.json must contain both username and key")
+print("[gpu-ci] Kaggle credentials loaded.")
+PY
 
       - name: Prepare unique Kaggle kernel payload
         env:
@@ -51,7 +59,13 @@ jobs:
           cp ci/kaggle/run_gpu_tests.py kaggle-kernel/
           cp ci/kaggle/kernel-metadata.template.json kaggle-kernel/kernel-metadata.json
 
-          KAGGLE_USERNAME=$(python -c "import json, pathlib; print(json.loads(pathlib.Path.home().joinpath('.kaggle','kaggle.json').read_text())['username'])")
+          KAGGLE_USERNAME=$(python - <<'PY'
+import json
+from pathlib import Path
+creds = json.loads((Path.home() / ".kaggle" / "kaggle.json").read_text())
+print(creds["username"])
+PY
+)
 
           SHORT_SHA=$(printf '%s' "$GITHUB_SHA" | cut -c1-7)
           KERNEL_SLUG="stackformer-gpu-${GITHUB_RUN_ID}-${SHORT_SHA}"
@@ -70,12 +84,6 @@ jobs:
           echo "KERNEL_REF=${KERNEL_REF}" >> "$GITHUB_ENV"
           echo "KERNEL_SLUG=${KERNEL_SLUG}" >> "$GITHUB_ENV"
           echo "[gpu-ci] Prepared kernel: ${KERNEL_REF}"
-
-      - name: Validate Kaggle auth before push
-        run: |
-          set -euo pipefail
-          kaggle config view > /dev/null
-          echo "[gpu-ci] Kaggle CLI auth preflight passed."
 
       - name: Push Kaggle kernel version (with one retry)
         run: |

@@ -1,6 +1,6 @@
 {
-  "id": "__KAGGLE_USERNAME__/__KERNEL_SLUG__",
-  "title": "__KERNEL_SLUG__",
+  "id": "gurumurthyr00300/stackformer-gpu-23998332400-6bc089f",
+  "title": "stackformer-gpu-23998332400-6bc089f",
   "code_file": "run_gpu_tests.py",
   "language": "python",
   "kernel_type": "script",
