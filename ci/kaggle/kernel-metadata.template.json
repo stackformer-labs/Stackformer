@@ -1,0 +1,10 @@
+{
+  "id": "__KAGGLE_USERNAME__/__KERNEL_SLUG__",
+  "title": "Stackformer GPU Tests __KERNEL_SLUG__",
+  "code_file": "run_gpu_tests.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true
+}
