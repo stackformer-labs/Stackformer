@@ -89,7 +89,7 @@ class Engine:
 
         lr = self.get_lr()
         if lr is not None:
-            self.metrics.update("learning_rate", lr)
+            self.metrics.update("lr", lr)
         if step_time is not None:
             self.metrics.update("step_time", step_time)
         if torch.is_tensor(inputs) and inputs.dim() >= 2:
@@ -100,7 +100,6 @@ class Engine:
             self.metrics.update("grad_norm", grad_norm)
 
         metrics = self.metrics.get_all(reduce_distributed=True)
-        metrics["lr"] = lr
         if state.global_step % self.log_every == 0:
             self._log_step(metrics)
         return metrics
@@ -147,7 +146,24 @@ class Engine:
     def _log_step(self, metrics: dict) -> None:
         if self.monitor is None or not is_main_process():
             return
-        self.monitor.log(metrics)
+
+        # ensure consistent keys
+        stable_metrics = dict(metrics)
+
+        EXPECTED_KEYS = [
+            "loss",
+            "lr",
+            "step_time",
+            "tokens",
+            "tokens_per_sec",
+            "perplexity",
+            "grad_norm",
+        ]
+
+        for key in EXPECTED_KEYS:
+            stable_metrics.setdefault(key, None)
+
+        self.monitor.log(stable_metrics)
 
     def get_lr(self) -> Optional[float]:
         opt = self.state.optimizer

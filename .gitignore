@@ -1,10 +1,45 @@
-stackformer/datasets/
+# Python Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
 
-stackformer/modules/tokenizer.py
+# Package / Build
+build/
+dist/
+*.egg-info/
+.eggs/
 
+# Virtual Environments
+venv/
+env/
+.venv/
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs
+logs/
+*.log
+
+# IDE / Editor
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# other secret file
 How to update pipy.txt
 
-stackformer/__pycache__/
-stackformer/modules/__pycache__/
-stackformer/models/__pycache__/
-stackformer/vision/__pycache__/
+# Project-specific
+# Ignore compiled cache in all submodules
+stackformer/**/__pycache__/
+
+# datasets
+stackformer/datasets/
+
+# tokenizer
+stackformer/modules/tokenizer.py

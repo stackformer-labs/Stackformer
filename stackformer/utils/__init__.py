@@ -12,6 +12,7 @@ from .utils import (
     seed_everything,
     timestamp,
 )
+from .attn_utils import _run_sdpa, _normalize_mask_type, _get_attention_mask
 
 __all__ = [
     "get_device",
@@ -28,4 +29,7 @@ __all__ = [
     "get_world_size",
     "is_main_process",
     "print_once",
+    "_run_sdpa",
+    "_normalize_mask_type",
+    "_get_attention_mask",
 ]

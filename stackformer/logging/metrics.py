@@ -126,7 +126,8 @@ class MetricTracker:
         self.update("tokens", tokens)
         elapsed = time.time() - self.start_time
         if elapsed > 0:
-            self.metrics["tokens_per_sec"].last = self.metrics["tokens"].sum / elapsed
+            tokens_per_sec = self.metrics["tokens"].sum / elapsed
+            self.update("tokens_per_sec", tokens_per_sec)   
 
     def update_perplexity(self, loss):
         self.update("perplexity", perplexity(loss))

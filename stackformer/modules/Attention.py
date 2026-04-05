@@ -37,44 +37,10 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from stackformer.modules.Masking import make_mask
+from stackformer.utils.attn_utils import _run_sdpa, _get_attention_mask 
 
 
 _ROPE_FREQ_CACHE: dict[tuple[int, int, str, torch.dtype], torch.Tensor] = {}
-
-
-def _normalize_mask_type(mask_type):
-    if mask_type is True:
-        return ["causal"]
-    if mask_type in (False, None):
-        return None
-    if isinstance(mask_type, str):
-        return [mask_type]
-    if isinstance(mask_type, (list, tuple)):
-        return list(mask_type)
-    raise TypeError("mask_type must be bool, str, or list of str")
-
-
-def _get_attention_mask(cache: dict, mask_type, seq_len: int, device, **mask_kwargs):
-    mask_types = _normalize_mask_type(mask_type)
-    if mask_types is None:
-        return None
-    key = (seq_len, tuple(mask_types), str(device))
-    if key not in cache:
-        cache[key] = make_mask(mask_types, seq_len, device=device, **mask_kwargs)
-    return cache[key]
-
-
-def _run_sdpa(q, k, v, attn_mask, dropout_p):
-    return F.scaled_dot_product_attention(
-        q,
-        k,
-        v,
-        attn_mask=attn_mask,
-        dropout_p=dropout_p,
-        is_causal=False,
-    )
-
 
 def _build_rope_frequency(head_dim: int, seq_len: int, device, dtype, theta: float = 10000.0) -> torch.Tensor:
     assert head_dim % 2 == 0, "head_dim must be even for RoPE"
@@ -90,6 +56,18 @@ def _build_rope_frequency(head_dim: int, seq_len: int, device, dtype, theta: flo
     _ROPE_FREQ_CACHE[key] = freq_complex
     return freq_complex
 
+def _apply_rotary_position_embedding(x: torch.Tensor, freq_complex: torch.Tensor):
+    B, H, T, D = x.shape
+    assert D % 2 == 0, "head_dim must be even for RoPE"
+
+    x = x.view(B, H, T, D // 2, 2)
+    x_complex = torch.view_as_complex(x)  # (B, H, T, D//2)
+
+    freq = freq_complex[:T].unsqueeze(0).unsqueeze(0)  # (1, 1, T, D//2)
+    x_rot = x_complex * freq  # rotate via complex mult
+
+    x_out = torch.view_as_real(x_rot).view(B, H, T, D)
+    return x_out.to(dtype=x.dtype, device=x.device)
 
 class Self_Attention(nn.Module):
     """Single-head causal/self attention.
@@ -145,12 +123,12 @@ class Self_Attention(nn.Module):
         # Cache for causal masks to avoid recomputation across forward passes
         self._causal_mask_cache = {}
 
-    def _get_or_create_mask(self, seq_len: int):
+    def _get_or_create_mask(self, seq_len: int, device):
         return _get_attention_mask(
             self._causal_mask_cache,
             self.mask_type,
             seq_len,
-            self.device,
+            device,
             **self.mask_kwargs,
         )
 
@@ -169,7 +147,7 @@ class Self_Attention(nn.Module):
 
         attn_mask = None
         if mask:
-            attn_mask = self._get_or_create_mask(T)
+            attn_mask = self._get_or_create_mask(seq_len=T, device=x.device)
 
         out = _run_sdpa(
             q,k,v,
@@ -240,12 +218,12 @@ class Multi_Head_Attention(nn.Module):
         # Cache for causal masks keyed by sequence length
         self._causal_mask_cache = {}
 
-    def _get_or_create_mask(self, seq_len: int):
+    def _get_or_create_mask(self, seq_len: int, device):
         return _get_attention_mask(
             self._causal_mask_cache,
             self.mask_type,
             seq_len,
-            self.device,
+            device,
             **self.mask_kwargs,
         )
 
@@ -266,7 +244,7 @@ class Multi_Head_Attention(nn.Module):
         causal_mask = None
         # Apply causal mask if needed
         if mask:
-            causal_mask = self._get_or_create_mask(T)  # (T, T)
+            causal_mask = self._get_or_create_mask(seq_len=T, device=x.device)  # (T, T)
 
         out = _run_sdpa(
             q, k, v,
@@ -332,32 +310,19 @@ class Multi_Head_Attention_With_RoPE(nn.Module):
         # Cache for causal masks keyed by sequence length
         self._causal_mask_cache = {}
 
-    def _get_or_create_mask(self, seq_len: int):
+    def _get_or_create_mask(self, seq_len: int, device):
         return _get_attention_mask(
             self._causal_mask_cache,
             self.mask_type,
             seq_len,
-            self.device,
+            device,
             **self.mask_kwargs,
         )
     
-    def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, theta: float = 10000.0):
-        return _build_rope_frequency(head_dim, seq_len, self.device, self.dtype, theta=theta)
+    def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, device: torch.device,theta: float = 10000.0):
+        return _build_rope_frequency(head_dim, seq_len, device, self.dtype, theta=theta)
 
-    def _apply_rotary_position_embedding(self, x: torch.Tensor, freq_complex: torch.Tensor):
-        B, H, T, D = x.shape
-        assert D % 2 == 0, "head_dim must be even for RoPE"
-
-        x = x.view(B, H, T, D // 2, 2)
-        x_complex = torch.view_as_complex(x)  # (B, H, T, D//2)
-
-        freq = freq_complex[:T].unsqueeze(0).unsqueeze(0)  # (1, 1, T, D//2)
-        x_rot = x_complex * freq  # rotate via complex mult
-
-        x_out = torch.view_as_real(x_rot).view(B, H, T, D)
-        return x_out.to(dtype=self.dtype, device=self.device)
-    
-    def forward(self, x, mask=True):
+    def forward(self, x, mask=True, theta: float=10000.0):
         B, T, C = x.shape
 
         q = self.q_proj(x)  # (B, T, C)
@@ -370,14 +335,14 @@ class Multi_Head_Attention_With_RoPE(nn.Module):
         k = k.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
         
-        freq = self._precompute_theta_position_frequency(self.head_dim, T)
-        q = self._apply_rotary_position_embedding(q, freq)
-        k = self._apply_rotary_position_embedding(k, freq)
+        freq = self._precompute_theta_position_frequency(self.head_dim, T, device=x.device,theta=theta)
+        q = _apply_rotary_position_embedding(q, freq)
+        k = _apply_rotary_position_embedding(k, freq)
         
         causal_mask = None
         # Apply causal mask if needed
         if mask:
-            causal_mask = self._get_or_create_mask(T)  # (T, T)
+            causal_mask = self._get_or_create_mask(seq_len=T, device=x.device)  # (T, T)
 
         out = _run_sdpa(
             q, k, v,
@@ -439,12 +404,12 @@ class Cross_MultiHead_Attention(nn.Module):
         # Cache for causal masks (optional)
         self._causal_mask_cache = {}
 
-    def _get_or_create_mask(self, seq_len: int):
+    def _get_or_create_mask(self, seq_len: int, device):
         return _get_attention_mask(
             self._causal_mask_cache,
             self.mask_type,
             seq_len,
-            self.device,
+            device,
             **self.mask_kwargs,
         )
 
@@ -471,7 +436,7 @@ class Cross_MultiHead_Attention(nn.Module):
         elif mask:
             if T != S:
                 raise ValueError("Causal cross-attention mask requires T == S. Provide explicit attn_mask with shape (T, S).")
-            causal_mask = self._get_or_create_mask(T)
+            causal_mask = self._get_or_create_mask(seq_len=T, device=x.device)
         else:
             causal_mask = None
 
@@ -534,12 +499,12 @@ class Multi_query_Attention(nn.Module):
         # Cache for causal masks (for autoregressive models)
         self._causal_mask_cache = {}
 
-    def _get_or_create_mask(self, seq_len: int):
+    def _get_or_create_mask(self, seq_len: int, device):
         return _get_attention_mask(
             self._causal_mask_cache,
             self.mask_type,
             seq_len,
-            self.device,
+            device,
             **self.mask_kwargs,
         )
 
@@ -562,7 +527,7 @@ class Multi_query_Attention(nn.Module):
         causal_mask = None
         # Apply causal mask if needed
         if mask:
-            causal_mask = self._get_or_create_mask(T)  # (T, T)
+            causal_mask = self._get_or_create_mask(seq_len=T, device=x.device)  # (T, T)
 
         out = _run_sdpa(
             q, k, v,
@@ -622,32 +587,19 @@ class Multi_query_Attention_With_RoPE(nn.Module):
         # Cache for causal masks (for autoregressive models)
         self._causal_mask_cache = {}
 
-    def _get_or_create_mask(self, seq_len: int):
+    def _get_or_create_mask(self, seq_len: int, device):
         return _get_attention_mask(
             self._causal_mask_cache,
             self.mask_type,
             seq_len,
-            self.device,
+            device,
             **self.mask_kwargs,
         )
     
-    def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, theta: float = 10000.0):
-        return _build_rope_frequency(head_dim, seq_len, self.device, self.dtype, theta=theta)
-
-    def _apply_rotary_position_embedding(self, x: torch.Tensor, freq_complex: torch.Tensor):
-        B, H, T, D = x.shape
-        assert D % 2 == 0, "head_dim must be even for RoPE"
-
-        x = x.view(B, H, T, D // 2, 2)
-        x_complex = torch.view_as_complex(x)  # (B, H, T, D//2)
-
-        freq = freq_complex[:T].unsqueeze(0).unsqueeze(0)  # (1, 1, T, D//2)
-        x_rot = x_complex * freq  # rotate via complex mult
-
-        x_out = torch.view_as_real(x_rot).view(B, H, T, D)
-        return x_out.to(dtype=self.dtype, device=self.device)
+    def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, device: torch.device,theta: float = 10000.0):
+        return _build_rope_frequency(head_dim, seq_len, device, self.dtype, theta=theta)
     
-    def forward(self, x, mask=True):
+    def forward(self, x, mask=True, theta: float=10000.0):
         B, T, C = x.shape
 
         # Project input to queries (multi-head) and shared keys/values (single head)
@@ -663,14 +615,14 @@ class Multi_query_Attention_With_RoPE(nn.Module):
         k = k.unsqueeze(1).expand(B, self.num_heads, T, self.head_dim)
         v = v.unsqueeze(1).expand(B, self.num_heads, T, self.head_dim)
         
-        freq = self._precompute_theta_position_frequency(self.head_dim, T)
-        q = self._apply_rotary_position_embedding(q, freq)
-        k = self._apply_rotary_position_embedding(k, freq)
+        freq = self._precompute_theta_position_frequency(self.head_dim, T, device=x.device,theta=theta)
+        q = _apply_rotary_position_embedding(q, freq)
+        k = _apply_rotary_position_embedding(k, freq)
         
         causal_mask = None
         # Apply causal mask if needed
         if mask:
-            causal_mask = self._get_or_create_mask(T)  # (T, T)
+            causal_mask = self._get_or_create_mask(seq_len=T, device=x.device)  # (T, T)
 
         out = _run_sdpa(
             q, k, v,
@@ -717,7 +669,6 @@ class Group_query_Attention(nn.Module):
         self.num_queries_per_kv = num_query_heads // num_kv_heads
         self.scale = 1.0 / math.sqrt(self.head_dim)
         self.mask_type = mask_type
-        self.device = device
         self.mask_kwargs = mask_kwargs
 
         # Projection layers
@@ -732,12 +683,12 @@ class Group_query_Attention(nn.Module):
         
         self._causal_mask_cache = {}
 
-    def _get_or_create_mask(self, seq_len: int):
+    def _get_or_create_mask(self, seq_len: int, device):
         return _get_attention_mask(
             self._causal_mask_cache,
             self.mask_type,
             seq_len,
-            self.device,
+            device,
             **self.mask_kwargs,
         )
 
@@ -761,7 +712,7 @@ class Group_query_Attention(nn.Module):
         causal_mask = None
         # Apply causal mask if needed
         if mask:
-            causal_mask = self._get_or_create_mask(T)  # (T, T)
+            causal_mask = self._get_or_create_mask(seq_len=T, device=x.device)  # (T, T)
 
         out = _run_sdpa(
             q, k, v,
@@ -811,7 +762,6 @@ class Group_query_Attention_With_RoPE(nn.Module):
         self.num_queries_per_kv = num_query_heads // num_kv_heads
         self.scale = 1.0 / math.sqrt(self.head_dim)
         self.mask_type = mask_type
-        self.device = device
         self.mask_kwargs = mask_kwargs
 
         # Projection layers
@@ -826,32 +776,19 @@ class Group_query_Attention_With_RoPE(nn.Module):
 
         self._causal_mask_cache = {}
 
-    def _get_or_create_mask(self, seq_len: int):
+    def _get_or_create_mask(self, seq_len: int, device):
         return _get_attention_mask(
             self._causal_mask_cache,
             self.mask_type,
             seq_len,
-            self.device,
+            device,
             **self.mask_kwargs,
         )
     
-    def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, theta: float = 10000.0):
-        return _build_rope_frequency(head_dim, seq_len, self.device, self.dtype, theta=theta)
-
-    def _apply_rotary_position_embedding(self, x: torch.Tensor, freq_complex: torch.Tensor):
-        B, H, T, D = x.shape
-        assert D % 2 == 0, "head_dim must be even for RoPE"
-
-        x = x.view(B, H, T, D // 2, 2)
-        x_complex = torch.view_as_complex(x)  # (B, H, T, D//2)
-
-        freq = freq_complex[:T].unsqueeze(0).unsqueeze(0)  # (1, 1, T, D//2)
-        x_rot = x_complex * freq  # rotate via complex mult
-
-        x_out = torch.view_as_real(x_rot).view(B, H, T, D)
-        return x_out.to(dtype=self.dtype, device=self.device)
+    def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, device: torch.device,theta: float = 10000.0):
+        return _build_rope_frequency(head_dim, seq_len, device, self.dtype, theta=theta)
     
-    def forward(self, x, mask=True):
+    def forward(self, x, mask=True, theta: float=10000.0):
         B, T, C = x.shape
 
         # Project Q, K, V
@@ -868,14 +805,14 @@ class Group_query_Attention_With_RoPE(nn.Module):
         k = k.repeat_interleave(self.num_queries_per_kv, dim=1)  # (B, num_query_heads, T, head_dim)
         v = v.repeat_interleave(self.num_queries_per_kv, dim=1)
         
-        freq = self._precompute_theta_position_frequency(self.head_dim, T)
-        q = self._apply_rotary_position_embedding(q, freq)
-        k = self._apply_rotary_position_embedding(k, freq)
+        freq = self._precompute_theta_position_frequency(self.head_dim, T, device=x.device,theta=theta)
+        q = _apply_rotary_position_embedding(q, freq)
+        k = _apply_rotary_position_embedding(k, freq)
         
         causal_mask = None
         # Apply causal mask if needed
         if mask:
-            causal_mask = self._get_or_create_mask(T)  # (T, T)
+            causal_mask = self._get_or_create_mask(seq_len=T, device=x.device)  # (T, T)
 
         out = _run_sdpa(
             q, k, v,
@@ -940,34 +877,21 @@ class kv_cache_multihead(nn.Module):
 
         self._causal_mask_cache = {}
 
-    def _get_or_create_kv_mask(self, T: int, S: int, start_pos: int):
+    def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, device: torch.device,theta: float = 10000.0):
+        return _build_rope_frequency(head_dim, seq_len, device, self.dtype, theta=theta)
+    
+    def _get_or_create_kv_mask(self, T: int, S: int, start_pos: int, device: torch.device):
         key = (T, S, start_pos)
 
         if key not in self._causal_mask_cache:
-            i = torch.arange(T, device=self.device).unsqueeze(1)
-            j = torch.arange(S, device=self.device).unsqueeze(0)
+            i = torch.arange(T, device=device).unsqueeze(1)
+            j = torch.arange(S, device=device).unsqueeze(0)
             visible = j <= (start_pos + i)
             self._causal_mask_cache[key] = ~visible
 
         return self._causal_mask_cache[key]
 
-    def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, theta: float = 10000.0):
-        return _build_rope_frequency(head_dim, seq_len, self.device, self.dtype, theta=theta)
-
-    def _apply_rotary_position_embedding(self, x: torch.Tensor, freq_complex: torch.Tensor):
-        B, H, T, D = x.shape
-        assert D % 2 == 0, "head_dim must be even for RoPE"
-
-        x = x.view(B, H, T, D // 2, 2)
-        x_complex = torch.view_as_complex(x)  # (B, H, T, D//2)
-
-        freq = freq_complex[:T].unsqueeze(0).unsqueeze(0)  # (1, 1, T, D//2)
-        x_rot = x_complex * freq  # rotate via complex mult
-
-        x_out = torch.view_as_real(x_rot).view(B, H, T, D)
-        return x_out.to(dtype=self.dtype, device=self.device)
-
-    def forward(self, x: torch.Tensor, start_pos: int, mask: bool = True, rope: bool = True):
+    def forward(self, x: torch.Tensor, start_pos: int, mask: bool = True, rope: bool = True, theta: float=10000.0):
         B, T, C = x.shape
         assert C == self.embed_dim, "Input embed_dim mismatch"
 
@@ -984,11 +908,11 @@ class kv_cache_multihead(nn.Module):
         # Rotary Position Embedding (correct for KV cache)        
         if rope:
             end_pos = start_pos + T
-            freq = self._precompute_theta_position_frequency(self.head_dim, end_pos)
+            freq = self._precompute_theta_position_frequency(self.head_dim, end_pos, device=x.device,theta=theta)
 
             # apply only slice corresponding to current tokens
-            q = self._apply_rotary_position_embedding(q, freq[start_pos:end_pos])
-            k = self._apply_rotary_position_embedding(k, freq[start_pos:end_pos])
+            q = _apply_rotary_position_embedding(q, freq[start_pos:end_pos])
+            k = _apply_rotary_position_embedding(k, freq[start_pos:end_pos])
         else:
             end_pos = start_pos + T
 
@@ -1009,7 +933,7 @@ class kv_cache_multihead(nn.Module):
         # Rectangular causal mask (T,S)
         attn_mask = None
         if mask:
-            attn_mask = self._get_or_create_kv_mask(T, end_pos, start_pos)
+            attn_mask = self._get_or_create_kv_mask(T, end_pos, start_pos, device=x.device)
 
         # Scaled Dot Product Attention (Flash / MemEff)        
         context = _run_sdpa(
@@ -1081,32 +1005,21 @@ class kv_cache_group_query(nn.Module):
         self.cache_keys = torch.zeros(batch_size, kv_seq_len * 2, num_kv_heads, self.head_dim, device=device, dtype=dtype)
         self.cache_values = torch.zeros(batch_size, kv_seq_len * 2, num_kv_heads, self.head_dim, device=device, dtype=dtype)
 
-    def _get_or_create_kv_mask(self, T: int, S: int, start_pos: int):
+    def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, device: torch.device,theta: float = 10000.0):
+        return _build_rope_frequency(head_dim, seq_len, device, self.dtype, theta=theta)
+    
+    def _get_or_create_kv_mask(self, T: int, S: int, start_pos: int, device: torch.device):
         key = (T, S, start_pos)
 
         if key not in self._causal_mask_cache:
-            i = torch.arange(T, device=self.device).unsqueeze(1)
-            j = torch.arange(S, device=self.device).unsqueeze(0)
+            i = torch.arange(T, device=device).unsqueeze(1)
+            j = torch.arange(S, device=device).unsqueeze(0)
             visible = j <= (start_pos + i)
             self._causal_mask_cache[key] = ~visible
 
         return self._causal_mask_cache[key]
-
-    def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, theta: float = 10000.0):
-        return _build_rope_frequency(head_dim, seq_len, self.device, self.dtype, theta=theta)
-
-    def _apply_rotary_position_embedding(self, x: torch.Tensor, freq_complex: torch.Tensor):
-        B, H, T, D = x.shape
-        assert D % 2 == 0, "head_dim must be even for RoPE"
-
-        x = x.view(B, H, T, D // 2, 2)  # Split last dim into real+imag
-        x_complex = torch.view_as_complex(x)  # (B, H, T, D//2)
-        freq = freq_complex[:T].unsqueeze(0).unsqueeze(0)  # (1, 1, T, D//2)
-        x_rot = x_complex * freq  # Complex multiplication = rotation
-        x_out = torch.view_as_real(x_rot).view(B, H, T, D)  # Back to real tensor
-        return x_out.to(dtype=self.dtype, device=self.device)
-
-    def forward(self, x, start_pos, mask=True, rope=True):
+    
+    def forward(self, x, start_pos, mask=True, rope=True, theta: float=10000.0):
         B, T, C = x.shape
 
         # Project Q, K, V
@@ -1123,11 +1036,11 @@ class kv_cache_group_query(nn.Module):
 
         # RoPE (correct for KV cache)
         if rope:
-            freq = self._precompute_theta_position_frequency(self.head_dim, end_pos)
-            q = self._apply_rotary_position_embedding(
+            freq = self._precompute_theta_position_frequency(self.head_dim, end_pos, device=x.device,theta=theta)
+            q = _apply_rotary_position_embedding(
                 q, freq[start_pos:end_pos]
             )
-            k = self._apply_rotary_position_embedding(
+            k = _apply_rotary_position_embedding(
                 k, freq[start_pos:end_pos]
             )
 
@@ -1151,7 +1064,7 @@ class kv_cache_group_query(nn.Module):
         # Rectangular causal mask (T,S)
         attn_mask = None
         if mask:
-            attn_mask = self._get_or_create_kv_mask(T, end_pos, start_pos)
+            attn_mask = self._get_or_create_kv_mask(T, end_pos, start_pos, device=x.device)
 
         # SDPA
         context = _run_sdpa(
