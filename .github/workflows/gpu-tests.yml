@@ -1,0 +1,151 @@
+name: GPU Tests (Kaggle)
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  gpu-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Kaggle CLI
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install kaggle
+
+      - name: Authenticate Kaggle API
+        env:
+          KAGGLE_JSON: ${{ secrets.KAGGLE_JSON }}
+        run: |
+          set -euo pipefail
+          if [ -z "$KAGGLE_JSON" ]; then
+            echo "[gpu-ci] ERROR: KAGGLE_JSON secret is not configured." >&2
+            exit 1
+          fi
+
+          mkdir -p ~/.kaggle
+          printf '%s' "$KAGGLE_JSON" > ~/.kaggle/kaggle.json
+          chmod 600 ~/.kaggle/kaggle.json
+
+          python -c "import json, pathlib; creds=json.loads(pathlib.Path.home().joinpath('.kaggle','kaggle.json').read_text()); assert creds.get('username') and creds.get('key'), 'kaggle.json must contain non-empty username and key'; print('[gpu-ci] Kaggle credentials loaded for user:', creds['username'])"
+
+      - name: Prepare unique Kaggle kernel payload
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          rm -rf kaggle-kernel kaggle-output
+          mkdir -p kaggle-kernel kaggle-output
+
+          cp ci/kaggle/run_gpu_tests.py kaggle-kernel/
+          cp ci/kaggle/kernel-metadata.template.json kaggle-kernel/kernel-metadata.json
+
+          KAGGLE_USERNAME=$(python -c "import json, pathlib; print(json.loads(pathlib.Path.home().joinpath('.kaggle','kaggle.json').read_text())['username'])")
+
+          SHORT_SHA=$(printf '%s' "$GITHUB_SHA" | cut -c1-7)
+          KERNEL_SLUG="stackformer-gpu-${GITHUB_RUN_ID}-${SHORT_SHA}"
+          KERNEL_REF="${KAGGLE_USERNAME}/${KERNEL_SLUG}"
+
+          # Kernel lifecycle note:
+          # - We intentionally use a unique slug to avoid run collisions.
+          # - To avoid long-term kernel clutter, periodically clean historical kernels
+          #   in Kaggle UI (Code tab) or with an internal housekeeping script.
+
+          sed -i "s/__KAGGLE_USERNAME__/${KAGGLE_USERNAME}/g" kaggle-kernel/kernel-metadata.json
+          sed -i "s/__KERNEL_SLUG__/${KERNEL_SLUG}/g" kaggle-kernel/kernel-metadata.json
+          sed -i "s|__STACKFORMER_REPO__|https://github.com/${GITHUB_REPOSITORY}.git|g" kaggle-kernel/run_gpu_tests.py
+          sed -i "s|__STACKFORMER_REF__|${GITHUB_SHA}|g" kaggle-kernel/run_gpu_tests.py
+
+          echo "KERNEL_REF=${KERNEL_REF}" >> "$GITHUB_ENV"
+          echo "KERNEL_SLUG=${KERNEL_SLUG}" >> "$GITHUB_ENV"
+          echo "[gpu-ci] Prepared kernel: ${KERNEL_REF}"
+
+      - name: Validate Kaggle auth before push
+        run: |
+          set -euo pipefail
+          kaggle config view > /dev/null
+          echo "[gpu-ci] Kaggle CLI auth preflight passed."
+
+      - name: Push Kaggle kernel version (with one retry)
+        run: |
+          set -euo pipefail
+          echo "[gpu-ci] Pushing kernel ${KERNEL_REF}"
+          if ! kaggle kernels push -p kaggle-kernel; then
+            echo "[gpu-ci] WARN: initial kernel push failed, retrying once..."
+            sleep 5
+            kaggle kernels push -p kaggle-kernel
+          fi
+
+      - name: Poll Kaggle run and stream logs
+        env:
+          KERNEL_REF: ${{ env.KERNEL_REF }}
+        run: |
+          set -euo pipefail
+
+          echo "[gpu-ci] Waiting for Kaggle kernel: ${KERNEL_REF}"
+
+          poll_status() {
+            kaggle kernels status "${KERNEL_REF}" 2>&1 || true
+          }
+
+          dump_logs() {
+            kaggle kernels output "${KERNEL_REF}" -p kaggle-output || true
+            if [ -d kaggle-output ]; then
+              find kaggle-output -maxdepth 2 -type f -print
+              while IFS= read -r file; do
+                echo "----- ${file} (first 200 lines) -----"
+                sed -n '1,200p' "${file}" || true
+              done < <(find kaggle-output -maxdepth 2 -type f)
+            fi
+          }
+
+          max_attempts=15
+          attempt=1
+          queue_extensions=0
+          max_queue_extensions=1
+
+          while [ "$attempt" -le "$max_attempts" ]; do
+            STATUS_RAW=$(poll_status)
+            STATUS=$(printf '%s' "${STATUS_RAW}" | tr '[:upper:]' '[:lower:]')
+            echo "[gpu-ci] Attempt ${attempt}/${max_attempts}: ${STATUS_RAW}"
+
+            if echo "${STATUS}" | grep -Eq "error|failed|cancel"; then
+              echo "[gpu-ci] ERROR: Kaggle kernel failed early." >&2
+              dump_logs
+              exit 1
+            fi
+
+            if echo "${STATUS}" | grep -q "complete"; then
+              echo "[gpu-ci] Kernel completed. Fetching logs..."
+              dump_logs
+              echo "[gpu-ci] GPU CI run succeeded."
+              exit 0
+            fi
+
+            if echo "${STATUS}" | grep -q "queued"; then
+              echo "[gpu-ci] still queued..."
+              if [ "$attempt" -eq "$max_attempts" ] && [ "$queue_extensions" -lt "$max_queue_extensions" ]; then
+                queue_extensions=$((queue_extensions + 1))
+                max_attempts=$((max_attempts + 15))
+                echo "[gpu-ci] Extending queue wait window to ${max_attempts} attempts."
+              fi
+            fi
+
+            attempt=$((attempt + 1))
+            sleep 20
+          done
+
+          echo "[gpu-ci] ERROR: Timed out waiting for Kaggle kernel completion (queue/startup exceeded budget)." >&2
+          dump_logs
+          exit 1
