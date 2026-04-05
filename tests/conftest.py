@@ -26,4 +26,3 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 @pytest.fixture(scope="session")
 def torch_device() -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-tests/sanity/test_gpu_s
