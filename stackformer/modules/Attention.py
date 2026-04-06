@@ -151,7 +151,7 @@ class Self_Attention(nn.Module):
 
         out = _run_sdpa(
             q,k,v,
-            attn_mask=attn_mask,
+            attn_mask = attn_mask,
             dropout_p=self.dropout_p)
 
         # Remove head dimension
@@ -248,7 +248,7 @@ class Multi_Head_Attention(nn.Module):
 
         out = _run_sdpa(
             q, k, v,
-            attn_mask=causal_mask,
+            attn_mask = causal_mask,
             dropout_p=self.dropout_p
         )
         
@@ -346,7 +346,7 @@ class Multi_Head_Attention_With_RoPE(nn.Module):
 
         out = _run_sdpa(
             q, k, v,
-            attn_mask=causal_mask,
+            attn_mask = causal_mask,
             dropout_p=self.dropout_p
         )
         
@@ -442,7 +442,7 @@ class Cross_MultiHead_Attention(nn.Module):
 
         out = _run_sdpa(
             q, k, v,
-            attn_mask=causal_mask,
+            attn_mask = causal_mask,
             dropout_p=self.dropout_p
         )
         
@@ -531,7 +531,7 @@ class Multi_query_Attention(nn.Module):
 
         out = _run_sdpa(
             q, k, v,
-            attn_mask=causal_mask,
+            attn_mask = causal_mask,
             dropout_p=self.dropout_p
         )
         
@@ -626,7 +626,7 @@ class Multi_query_Attention_With_RoPE(nn.Module):
 
         out = _run_sdpa(
             q, k, v,
-            attn_mask=causal_mask,
+            attn_mask = causal_mask,
             dropout_p=self.dropout_p
         )
 
@@ -716,8 +716,8 @@ class Group_query_Attention(nn.Module):
 
         out = _run_sdpa(
             q, k, v,
-            attn_mask=causal_mask,
-            dropout_p=self.dropout_p
+            attn_mask = causal_mask,
+            dropout_p = self.dropout_p
         )
 
         out = out.transpose(1, 2).contiguous().view(B, T, C)
@@ -816,8 +816,8 @@ class Group_query_Attention_With_RoPE(nn.Module):
 
         out = _run_sdpa(
             q, k, v,
-            attn_mask=causal_mask,
-            dropout_p=self.dropout_p
+            attn_mask = causal_mask,
+            dropout_p = self.dropout_p
         )
         
         out = out.transpose(1, 2).contiguous().view(B, T, C)
@@ -887,7 +887,7 @@ class kv_cache_multihead(nn.Module):
             i = torch.arange(T, device=device).unsqueeze(1)
             j = torch.arange(S, device=device).unsqueeze(0)
             visible = j <= (start_pos + i)
-            self._causal_mask_cache[key] = ~visible
+            self._causal_mask_cache[key] = visible
 
         return self._causal_mask_cache[key]
 
@@ -940,8 +940,8 @@ class kv_cache_multihead(nn.Module):
             q,
             k_full,
             v_full,
-            attn_mask=attn_mask,   # (T, S)
-            dropout_p=self.dropout_p
+            attn_mask = attn_mask,   # (T, S)
+            dropout_p = self.dropout_p
         )
 
         # Merge heads + output projection        
@@ -1015,7 +1015,7 @@ class kv_cache_group_query(nn.Module):
             i = torch.arange(T, device=device).unsqueeze(1)
             j = torch.arange(S, device=device).unsqueeze(0)
             visible = j <= (start_pos + i)
-            self._causal_mask_cache[key] = ~visible
+            self._causal_mask_cache[key] = visible
 
         return self._causal_mask_cache[key]
     
@@ -1071,8 +1071,8 @@ class kv_cache_group_query(nn.Module):
             q,
             k_full,
             v_full,
-            attn_mask=attn_mask,
-            dropout_p=self.dropout_p
+            attn_mask = attn_mask,
+            dropout_p = self.dropout_p
         )
 
         # Merge heads

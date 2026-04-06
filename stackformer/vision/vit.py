@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 from stackformer.modules.Attention import Multi_Head_Attention
-from stackformer.modules.Feed_forward import FF_ReLU
+from stackformer.modules.Feed_forward import FF_GELU
 
 """Vision Transformer (ViT) building blocks.
 
@@ -49,7 +49,7 @@ class Block(nn.Module):
             dtype=dtype,
         )
         self.norm1 = nn.LayerNorm(Emb_dim, eps=eps, dtype=dtype)
-        self.ff_relu = FF_ReLU(Emb_dim, hidden_dim, dropout, device=device, dtype=dtype)
+        self.ff_gelu = FF_GELU(Emb_dim, hidden_dim, dropout, device=device, dtype=dtype)
         self.norm2 = nn.LayerNorm(Emb_dim, eps=eps, dtype=dtype)
 
     def forward(self, x):
@@ -62,7 +62,7 @@ class Block(nn.Module):
         # Pre-norm FFN
         residual = x
         x = self.norm2(x)
-        x = self.ff_relu(x)
+        x = self.ff_gelu(x)
         x = x + residual
 
         return x
@@ -97,7 +97,7 @@ class ViT(nn.Module):
         - Attention: multi-head self-attention (full global attention)
         - Masking: no causal mask (bidirectional attention over all patches)
         - Positional encoding: learnable absolute positional embeddings
-        - Feed-forward block: ReLU-based FFN (``FF_ReLU``)
+        - Feed-forward block: GELU-based FFN (``FF_GELU``)
         - Normalization: Pre-Norm LayerNorm inside each transformer block
         - Head: LayerNorm + Linear classifier on ``[CLS]`` token
 

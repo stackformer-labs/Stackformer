@@ -1,7 +1,5 @@
 import math
-
 import torch
-
 from stackformer.modules.Masking import make_mask
 
 BATCH = 2
@@ -13,19 +11,24 @@ def _manual_masked_attention(x: torch.Tensor, mask: torch.Tensor) -> torch.Tenso
     q = x
     k = x
     v = x
+
     scores = (q @ k.transpose(-1, -2)) / math.sqrt(x.size(-1))
-    scores = scores.masked_fill(mask.unsqueeze(0), float("-inf"))
+
+    scores = scores.masked_fill(~mask.unsqueeze(0), float("-inf"))
+
     weights = torch.softmax(scores, dim=-1)
     return weights @ v
 
 
 def test_causal_mask_prevents_future_token_leakage():
     torch.manual_seed(0)
+
     x1 = torch.randn(BATCH, SEQ, EMB)
     x2 = x1.clone()
     x2[:, -1] += 5.0
 
     causal_mask = make_mask(["causal"], seq_len=SEQ)
+
     out1 = _manual_masked_attention(x1, causal_mask)
     out2 = _manual_masked_attention(x2, causal_mask)
 
