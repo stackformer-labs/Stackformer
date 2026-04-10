@@ -6,8 +6,8 @@
   <a href="https://pypi.org/project/stackformer/"><img src="https://img.shields.io/pypi/v/stackformer.svg" alt="PyPI version" /></a>
   <a href="https://pypi.org/project/stackformer/"><img src="https://img.shields.io/pypi/pyversions/stackformer.svg" alt="Python versions" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License" /></a>
-  <a href="https://github.com/Gurumurthy30/Stackformer/actions">
-    <img src="https://img.shields.io/github/actions/workflow/status/Gurumurthy30/Stackformer/core-tests.yml?branch=main&label=CI" alt="CI status" />
+  <a href="https://github.com/stackformer-labs/Stackformer/actions">
+  <img src="https://img.shields.io/github/actions/workflow/status/stackformer-labs/Stackformer/core-tests.yml?branch=main&label=CI" alt="CI status" />
   </a>
 </p>
 
@@ -21,13 +21,12 @@ StackFormer is designed for fast experimentation with reusable Transformer build
 
 ## Key Features
 
-- Modular transformer components
-- GPT / LLaMA / Gemma-style model implementations
-- Vision models (ViT, SegFormer)
-- Trainer infrastructure with AMP mixed precision and DDP support
-- Logging and metrics utilities
-- Checkpointing and resume training
-- CI-tested training infrastructure
+- Modular transformer building blocks (attention, FFN, normalization)
+- Support for GPT, LLaMA, ViT, and SegFormer architectures
+- Flexible Trainer with AMP and distributed training (DDP)
+- Built-in logging (TensorBoard, W&B)
+- Checkpointing and resumable training
+- Clean PyTorch-first design for research and production
 
 ## Project Structure
 
@@ -109,7 +108,7 @@ pip install stackformer
 ### Install from source
 
 ```bash
-git clone https://github.com/Gurumurthy30/Stackformer.git
+git clone https://github.com/stackformer-labs/Stackformer.git
 cd Stackformer
 pip install -e .
 ```
@@ -117,13 +116,14 @@ pip install -e .
 ## Quick Start
 
 ```python
-from stackformer.engine import Trainer
-import torch.nn as nn
+from stackformer.models.Transformer import Transformer
 
-model = nn.Linear(10, 1)
-
-trainer = Trainer(model=model)
-trainer.fit(dataset)
+model = Transformer(
+    vocab_size=32000,
+    d_model=512,
+    n_heads=8,
+    n_layers=6
+)
 ```
 
 ## Examples
@@ -147,6 +147,14 @@ examples/train_ddp.py
 
 ## Community
 
-- Issues: https://github.com/Gurumurthy30/Stackformer/issues
-- Discussions: https://github.com/Gurumurthy30/Stackformer/discussions
-- Releases: https://github.com/Gurumurthy30/Stackformer/releases
+- Issues: https://github.com/stackformer-labs/Stackformer/issues
+- Discussions: https://github.com/stackformer-labs/Stackformer/discussions
+- Releases: https://github.com/stackformer-labs/Stackformer/releases
+
+## License
+
+MIT License
+
+## Contributing
+
+Contributions are welcome. Please open issues or discussions to propose changes.
