@@ -7,7 +7,7 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 
 authors = [
-  { name = "Gurumurthy", email = "gurumurthy.00300@gmail.com" }
+  { name = "Stackformer Labs", email = "stackformer.dev@gmail.com" }
 ]
 
 keywords = ["transformer", "pytorch", "deep-learning", "attention", "llm", "machine-learning"]
@@ -39,11 +39,11 @@ dev = [
 ]
 
 [project.urls]
-Repository = "https://github.com/Gurumurthy30/Stackformer"
-Releases = "https://github.com/Gurumurthy30/Stackformer/releases"
-Issue-Tracker = "https://github.com/Gurumurthy30/Stackformer/issues"
-Discussions = "https://github.com/Gurumurthy30/Stackformer/discussions"
-Documentation = "https://github.com/Gurumurthy30/Stackformer/tree/main/docs"
+Repository = "https://github.com/stackformer-labs/Stackformer"
+Releases = "https://github.com/stackformer-labs/Stackformer/releases"
+Issue-Tracker = "https://github.com/stackformer-labs/Stackformer/issues"
+Discussions = "https://github.com/stackformer-labs/Stackformer/discussions"
+Documentation = "https://github.com/stackformer-labs/Stackformer/tree/main/docs"
 
 [tool.setuptools.packages.find]
 include = ["stackformer*"]
