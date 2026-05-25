@@ -24,10 +24,7 @@ from torch.optim.lr_scheduler import (
     LambdaLR,
 )
 
-# -----------------------------------------------------
 # Optimizer Registry
-# -----------------------------------------------------
-
 OPTIMIZERS = {
     "adam": Adam,
     "adamw": AdamW,
@@ -36,10 +33,7 @@ OPTIMIZERS = {
     "adagrad": Adagrad,
 }
 
-# -----------------------------------------------------
 # Scheduler Registry
-# -----------------------------------------------------
-
 SCHEDULERS = {
     "step": StepLR,
     "cosine": CosineAnnealingLR,
@@ -48,10 +42,7 @@ SCHEDULERS = {
     "plateau": ReduceLROnPlateau,
 }
 
-# -----------------------------------------------------
 # Parameter Group Helpers
-# -----------------------------------------------------
-
 def get_parameter_groups(model, weight_decay: float = 0.0):
     """
     Create parameter groups separating parameters that should
@@ -107,11 +98,7 @@ def get_parameter_groups(model, weight_decay: float = 0.0):
         {"params": no_decay, "weight_decay": 0.0},
     ]
 
-
-# -----------------------------------------------------
 # Optimizer Factory
-# -----------------------------------------------------
-
 def create_optimizer(
     model,
     optimizer_name: str = "adamw",
@@ -154,11 +141,7 @@ def create_optimizer(
 
     return optimizer
 
-
-# -----------------------------------------------------
 # Warmup Schedulers (important for Transformers)
-# -----------------------------------------------------
-
 def linear_warmup_scheduler(optimizer, warmup_steps, total_steps):
 
     if total_steps is None:
@@ -196,11 +179,7 @@ def cosine_warmup_scheduler(optimizer, warmup_steps, total_steps):
 
     return LambdaLR(optimizer, lr_lambda)
 
-
-# -----------------------------------------------------
 # Scheduler Factory
-# -----------------------------------------------------
-
 def create_scheduler(
     optimizer,
     scheduler_name: str = "cosine",
@@ -229,10 +208,7 @@ def create_scheduler(
 
     scheduler_name = scheduler_name.lower()
 
-    # ---------------------------------------------
     # Transformer schedulers
-    # ---------------------------------------------
-
     if scheduler_name == "linear_warmup":
 
         return linear_warmup_scheduler(
@@ -249,10 +225,7 @@ def create_scheduler(
             total_steps,
         )
 
-    # ---------------------------------------------
     # Standard schedulers
-    # ---------------------------------------------
-
     if scheduler_name == "cosine":
 
         if total_steps is None:
