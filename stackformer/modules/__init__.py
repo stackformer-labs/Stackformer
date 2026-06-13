@@ -29,6 +29,12 @@ from .position_embedding import (
     SinusoidalPositionalEmbedding,
 )
 
+from .layer import (
+    BlockConfig, 
+    TransformerEncoder, 
+    TransformerDecoder,
+)
+
 TokenizerImportError: Exception | None = None
 
 try:
@@ -39,6 +45,7 @@ except Exception as exc:  # optional dependency: tiktoken
 
 __all__ = [
     "AbsolutePositionEmbedding",
+    "BlockConfig",
     "Cross_MultiHead_Attention",
     "FF_GELU",
     "FF_GeGLU",
@@ -58,6 +65,8 @@ __all__ = [
     "RoPE",
     "Self_Attention",
     "SinusoidalPositionalEmbedding",
+    "TransformerEncoder", 
+    "TransformerDecoder",
     "kv_cache_group_query",
     "kv_cache_multihead",
     "make_mask",

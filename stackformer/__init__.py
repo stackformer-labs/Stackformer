@@ -27,6 +27,9 @@ from .modules import (
     kv_cache_group_query,
     kv_cache_multihead,
     make_mask,
+    BlockConfig, 
+    TransformerEncoder, 
+    TransformerDecoder,
 )
 from .vision import SegFormerB0, ViT
 
@@ -34,6 +37,7 @@ from .engine import Trainer
 
 __all__ = [
     "AbsolutePositionEmbedding",
+    "BlockConfig",
     "Cross_MultiHead_Attention",
     "FF_GELU",
     "FF_GeGLU",
@@ -56,6 +60,8 @@ __all__ = [
     "SegFormerB0",
     "Self_Attention",
     "SinusoidalPositionalEmbedding",
+    "TransformerEncoder", 
+    "TransformerDecoder",
     "ViT",
     "gemma_1_2b",
     "gemma_1_7b",
