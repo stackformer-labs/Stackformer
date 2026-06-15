@@ -64,7 +64,7 @@ def test_llama_2_invalid_head_setup_raises():
             vocab_size=20,
             num_layers=1,
             embed_dim=8,
-            num_query_heads=3,
+            num_query_heads=4,
             num_kv_heads=2,
             kv_seq_len=4,
             batch_size=1,
