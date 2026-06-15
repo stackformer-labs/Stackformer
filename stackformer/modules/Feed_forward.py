@@ -300,39 +300,13 @@ class FF_SwiGLU(nn.Module):
     def __init__(self, embed_dim, hidden_dim, dropout=0.0, device='cpu', dtype=torch.float32):
         super().__init__()
         
-        # First linear layer projects to 2*hidden_dim for gating
-        self.linear1 = nn.Linear(embed_dim, hidden_dim * 2, device=device, dtype=dtype)
-        self.dropout1 = nn.Dropout(dropout)
-        
-        # Second linear layer projects back to embed_dim
-        self.linear2 = nn.Linear(hidden_dim, embed_dim, device=device, dtype=dtype)
-        self.dropout2 = nn.Dropout(dropout)
+        self.W_gate = nn.Linear(embed_dim, hidden_dim, bias=False, device=device, dtype=dtype)
+        self.W_up   = nn.Linear(embed_dim, hidden_dim, bias=False, device=device, dtype=dtype)
+        self.W_down = nn.Linear(hidden_dim, embed_dim, bias=False, device=device, dtype=dtype)
+        self.dropout = nn.Dropout(dropout)
     
     def forward(self, x):
-        """
-        Forward pass with SwiGLU gating mechanism.
-        
-        Process:
-        1. Project to 2*hidden_dim
-        2. Split into gate and value parts
-        3. Apply gating: value * SiLU(gate)
-        4. Project back to embed_dim
-        """
-        # Project to 2*hidden_dim
-        x_proj = self.linear1(x)
-        
-        # Split into two equal parts along last dimension
-        x1, x2 = x_proj.chunk(2, dim=-1)  # Each has shape (..., hidden_dim)
-        
-        # Gating mechanism: x2 (value) * SiLU(x1) (gate)
-        x = x2 * F.silu(x1)
-        x = self.dropout1(x)
-        
-        # Project back to original dimension
-        x = self.linear2(x)
-        x = self.dropout2(x)
-        
-        return x.to(device=x.device, dtype=x.dtype)
+        return self.dropout(self.W_down(F.silu(self.W_gate(x)) * self.W_up(x)))
 
 
 class FF_GeGLU(nn.Module):

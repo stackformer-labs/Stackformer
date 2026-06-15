@@ -50,7 +50,9 @@ class AbsolutePositionEmbedding(nn.Module):
 
     def forward(self, x):
         batch_size, seq_len = x.shape[0], x.shape[1]
-        positions = torch.arange(seq_len, device=self.device, dtype=torch.long)
+        # Derive device from the embedding weight so this works correctly after
+        # .to(device) without relying on the stale self.device string.
+        positions = torch.arange(seq_len, device=self.embedding.weight.device, dtype=torch.long)
         abs_pos = self.embedding(positions)  # (seq_len, embed_dim)
         out = abs_pos.unsqueeze(0).expand(batch_size, seq_len, -1)  # (batch, seq_len, embed_dim)
         return out
@@ -104,8 +106,10 @@ class SinusoidalPositionalEmbedding(nn.Module):
 
     def forward(self, x):
         batch_size, seq_len = x.shape[0], x.shape[1]
+        # self.pe is a registered buffer, so it already lives on the correct
+        # device after .to(device). Do NOT use self.device (constructor string).
         out = self.pe[:seq_len].unsqueeze(0).expand(batch_size, seq_len, -1)
-        return out.to(device=self.device, dtype=self.dtype)
+        return out.to(dtype=self.dtype)
 
 class RoPE(nn.Module):
     """Rotary positional embedding for attention query/key tensors.
@@ -163,15 +167,17 @@ class RoPE(nn.Module):
         assert D % 2 == 0, "head_dim must be even for RoPE"
 
         # reshape to complex
-        x = x.view(B, H, T, D // 2, 2)
-        x_complex = torch.view_as_complex(x)  # (B, H, T, D//2)
+        x_r = x.view(B, H, T, D // 2, 2)
+        x_complex = torch.view_as_complex(x_r.float())  # (B, H, T, D//2); promote for complex ops
 
-        # slice correct freqs
+        # slice correct freqs — freq_complex is a registered buffer, already on
+        # the correct device after .to(device). Cast to match x_complex.
         freqs = self.freq_complex[:T].unsqueeze(0).unsqueeze(0)  # (1,1,T,D//2)
+        freqs = freqs.to(device=x.device)
 
         # apply rotation
         x_rot = x_complex * freqs  # (B, H, T, D//2)
 
-        # back to real
+        # back to real, cast back to original dtype
         x_out = torch.view_as_real(x_rot).view(B, H, T, D)
-        return x_out.to(dtype=self.dtype, device=x.device)
+        return x_out.to(dtype=x.dtype)

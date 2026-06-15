@@ -40,11 +40,12 @@ import torch.nn.functional as F
 from stackformer.utils.attn_utils import _run_sdpa, _get_attention_mask 
 
 
-_ROPE_FREQ_CACHE: dict[tuple[int, int, str, torch.dtype], torch.Tensor] = {}
+_ROPE_FREQ_CACHE: dict[tuple[int, int, str, torch.dtype, float], torch.Tensor] = {}
 
 def _build_rope_frequency(head_dim: int, seq_len: int, device, dtype, theta: float = 10000.0) -> torch.Tensor:
     assert head_dim % 2 == 0, "head_dim must be even for RoPE"
-    key = (head_dim, seq_len, str(device), dtype)
+    # theta is included in the key so different base frequencies don't alias
+    key = (head_dim, seq_len, str(device), dtype, theta)
     if key in _ROPE_FREQ_CACHE:
         return _ROPE_FREQ_CACHE[key]
 
@@ -171,7 +172,6 @@ class Multi_Head_Attention(nn.Module):
         num_heads (int, required): Number of query heads ``H``.
             Rule: ``embed_dim % num_heads == 0`` (enforced).
         dropout (float, optional, default=0.0): Dropout on attention probs.
-        dropout (float, optional, default=0.0): Dropout on attention probs.
         qkv_bias (bool, optional, default=False): Bias in Q/K/V projections.
         device (str or torch.device, optional, default='cpu').
         dtype (torch.dtype, optional, default=torch.float32).
@@ -270,7 +270,6 @@ class Multi_Head_Attention_With_RoPE(nn.Module):
             - ``embed_dim % num_heads == 0``
             - ``head_dim`` must be even for RoPE pair-rotation.
         dropout (float, optional, default=0.0).
-        dropout (float, optional, default=0.0).
         qkv_bias (bool, optional, default=False).
         device (optional, default='cpu').
         dtype (optional, default=torch.float32).
@@ -361,7 +360,6 @@ class Cross_MultiHead_Attention(nn.Module):
     Constructor args:
         embed_dim (int, required).
         num_heads (int, required): ``embed_dim % num_heads == 0``.
-        dropout (float, optional, default=0.0).
         dropout (float, optional, default=0.0).
         qkv_bias (bool, optional, default=False).
         device (optional, default='cpu').
@@ -459,7 +457,6 @@ class Multi_query_Attention(nn.Module):
         num_heads (int, required): Number of query heads. Rule:
             ``embed_dim % num_heads == 0``.
         dropout (float, optional, default=0.0).
-        dropout (float, optional, default=0.0).
         qkv_bias (bool, optional, default=False).
         device (optional, default='cpu').
         dtype (optional, default=torch.float32).
@@ -546,7 +543,6 @@ class Multi_query_Attention_With_RoPE(nn.Module):
         embed_dim (int, required).
         num_heads (int, required): ``embed_dim % num_heads == 0`` and even
             ``head_dim`` for RoPE.
-        dropout (float, optional, default=0.0).
         dropout (float, optional, default=0.0).
         qkv_bias (bool, optional, default=False).
         device (optional, default='cpu').
@@ -643,7 +639,6 @@ class Group_query_Attention(nn.Module):
         num_kv_heads (int, required): Rule ``num_query_heads % num_kv_heads == 0``.
         qkv_bias (bool, optional, default=False).
         dropout (float, optional, default=0.0).
-        dropout (float, optional, default=0.0).
         device (optional, default='cpu').
         dtype (optional, default=torch.float32).
         mask_type ([str], optional, default=['causal']): 'causal' or 'sliding_window'.
@@ -732,7 +727,6 @@ class Group_query_Attention_With_RoPE(nn.Module):
         num_query_heads (int, required): ``embed_dim % num_query_heads == 0``.
         num_kv_heads (int, required): ``num_query_heads % num_kv_heads == 0``.
         qkv_bias (bool, optional, default=False).
-        dropout (float, optional, default=0.0).
         dropout (float, optional, default=0.0).
         device (optional, default='cpu').
         dtype (optional, default=torch.float32).
@@ -834,7 +828,6 @@ class kv_cache_multihead(nn.Module):
         kv_seq_len (int, required): Maximum cache sequence length reference.
         qkv_bias (bool, optional, default=False).
         dropout (float, optional, default=0.0).
-        dropout (float, optional, default=0.0).
         device (optional, default='cpu').
         dtype (optional, default=torch.float32).
 
@@ -871,17 +864,28 @@ class kv_cache_multihead(nn.Module):
         # Dropout applied to the attention weights
         self.dropout_p = dropout
 
-        # KV Cache (double kv_seq_len to avoid OOB)
-        self.cache_keys = torch.zeros(batch_size, kv_seq_len * 2, num_heads, self.head_dim, device=device, dtype=dtype)
-        self.cache_values = torch.zeros(batch_size, kv_seq_len * 2, num_heads, self.head_dim, device=device, dtype=dtype)
-
+        # KV Cache registered as buffers so they move with .to(device) and are
+        # included in state_dict. persistent=False keeps them out of checkpoints
+        # (they are transient inference state, not learned parameters).
+        self.register_buffer(
+            "cache_keys",
+            torch.zeros(batch_size, kv_seq_len * 2, num_heads, self.head_dim, dtype=dtype),
+            persistent=False,
+        )
+        self.register_buffer(
+            "cache_values",
+            torch.zeros(batch_size, kv_seq_len * 2, num_heads, self.head_dim, dtype=dtype),
+            persistent=False,
+        )
+        self.kv_seq_len = kv_seq_len
         self._causal_mask_cache = {}
 
-    def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, device: torch.device,theta: float = 10000.0):
+    def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, device: torch.device, theta: float = 10000.0):
         return _build_rope_frequency(head_dim, seq_len, device, self.dtype, theta=theta)
-    
+
     def _get_or_create_kv_mask(self, T: int, S: int, start_pos: int, device: torch.device):
-        key = (T, S, start_pos)
+        # Device included in key so cached masks are not reused across device moves
+        key = (T, S, start_pos, str(device))
 
         if key not in self._causal_mask_cache:
             i = torch.arange(T, device=device).unsqueeze(1)
@@ -891,9 +895,14 @@ class kv_cache_multihead(nn.Module):
 
         return self._causal_mask_cache[key]
 
-    def forward(self, x: torch.Tensor, start_pos: int, mask: bool = True, rope: bool = True, theta: float=10000.0):
+    def forward(self, x: torch.Tensor, start_pos: int, mask: bool = True, rope: bool = True, theta: float = 10000.0):
         B, T, C = x.shape
         assert C == self.embed_dim, "Input embed_dim mismatch"
+        end_pos = start_pos + T
+        assert end_pos <= self.cache_keys.shape[1], (
+            f"KV cache capacity exceeded: start_pos={start_pos} + T={T} = {end_pos} "
+            f"> cache length {self.cache_keys.shape[1]}"
+        )
 
         # Project Q, K, V
         q = self.q_proj(x)  # (B, T, C)
@@ -904,25 +913,31 @@ class kv_cache_multihead(nn.Module):
         q = q.view(B, T, self.num_heads, self.head_dim)
         k = k.view(B, T, self.num_heads, self.head_dim)
         v = v.view(B, T, self.num_heads, self.head_dim)
-        
-        # Rotary Position Embedding (correct for KV cache)        
-        if rope:
-            end_pos = start_pos + T
-            freq = self._precompute_theta_position_frequency(self.head_dim, end_pos, device=x.device,theta=theta)
 
-            # apply only slice corresponding to current tokens
+        # Rotary Position Embedding (correct for KV cache)
+        if rope:
+            freq = self._precompute_theta_position_frequency(self.head_dim, end_pos, device=x.device, theta=theta)
+            # apply only the slice corresponding to current tokens
             q = _apply_rotary_position_embedding(q, freq[start_pos:end_pos])
             k = _apply_rotary_position_embedding(k, freq[start_pos:end_pos])
-        else:
-            end_pos = start_pos + T
 
-        # Write KV cache
-        self.cache_keys[:B, start_pos:end_pos] = k.detach()
-        self.cache_values[:B, start_pos:end_pos] = v.detach()
-        
-        # Read full cached KV        
-        k_full = self.cache_keys[:B, :end_pos].detach()     # (B, S, H, D)
-        v_full = self.cache_values[:B, :end_pos].detach()
+        # Write KV cache — detach only at inference to avoid blocking gradients
+        # during training (torch.is_grad_enabled() is False inside torch.no_grad())
+        _k_to_store = k.detach() if not torch.is_grad_enabled() else k
+        _v_to_store = v.detach() if not torch.is_grad_enabled() else v
+        self.cache_keys[:B, start_pos:end_pos] = _k_to_store
+        self.cache_values[:B, start_pos:end_pos] = _v_to_store
+
+        # Read full cached KV
+        k_full = self.cache_keys[:B, :end_pos]
+        v_full = self.cache_values[:B, :end_pos]
+        if torch.is_grad_enabled():
+            # Detach the prefix positions (already committed in prior steps);
+            # only the current chunk participates in the gradient graph.
+            k_full = k_full.detach().clone()
+            k_full[:B, start_pos:end_pos] = _k_to_store
+            v_full = v_full.detach().clone()
+            v_full[:B, start_pos:end_pos] = _v_to_store
 
         # Transpose to SDPA format        
         q = q.transpose(1, 2)           # (B, H, T, D)
@@ -958,7 +973,6 @@ class kv_cache_group_query(nn.Module):
         kv_seq_len (int, required): Maximum cache length reference.
         batch_size (int, required): Cache batch capacity.
         qkv_bias (bool, optional, default=False).
-        dropout (float, optional, default=0.0).
         dropout (float, optional, default=0.0).
         device (optional, default='cpu').
         dtype (optional, default=torch.float32).
@@ -1001,15 +1015,25 @@ class kv_cache_group_query(nn.Module):
         
         self._causal_mask_cache = {}
 
-        # KV Cache (double kv_seq_len to avoid OOB)
-        self.cache_keys = torch.zeros(batch_size, kv_seq_len * 2, num_kv_heads, self.head_dim, device=device, dtype=dtype)
-        self.cache_values = torch.zeros(batch_size, kv_seq_len * 2, num_kv_heads, self.head_dim, device=device, dtype=dtype)
+        # KV Cache registered as buffers so they move with .to(device) and are
+        # included in state_dict. persistent=False keeps them out of checkpoints.
+        self.register_buffer(
+            "cache_keys",
+            torch.zeros(batch_size, kv_seq_len * 2, num_kv_heads, self.head_dim, dtype=dtype),
+            persistent=False,
+        )
+        self.register_buffer(
+            "cache_values",
+            torch.zeros(batch_size, kv_seq_len * 2, num_kv_heads, self.head_dim, dtype=dtype),
+            persistent=False,
+        )
 
-    def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, device: torch.device,theta: float = 10000.0):
+    def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, device: torch.device, theta: float = 10000.0):
         return _build_rope_frequency(head_dim, seq_len, device, self.dtype, theta=theta)
-    
+
     def _get_or_create_kv_mask(self, T: int, S: int, start_pos: int, device: torch.device):
-        key = (T, S, start_pos)
+        # Device included in key so cached masks are not reused across device moves
+        key = (T, S, start_pos, str(device))
 
         if key not in self._causal_mask_cache:
             i = torch.arange(T, device=device).unsqueeze(1)
@@ -1018,39 +1042,45 @@ class kv_cache_group_query(nn.Module):
             self._causal_mask_cache[key] = visible
 
         return self._causal_mask_cache[key]
-    
-    def forward(self, x, start_pos, mask=True, rope=True, theta: float=10000.0):
+
+    def forward(self, x, start_pos, mask=True, rope=True, theta: float = 10000.0):
         B, T, C = x.shape
+        end_pos = start_pos + T
+        assert end_pos <= self.cache_keys.shape[1], (
+            f"KV cache capacity exceeded: start_pos={start_pos} + T={T} = {end_pos} "
+            f"> cache length {self.cache_keys.shape[1]}"
+        )
 
         # Project Q, K, V
         q = self.q_proj(x)
         k = self.k_proj(x)
         v = self.v_proj(x)
         # Reshape
-        # Q: (B, T, QH, D)
-        # K/V: (B, T, KVH, D)
+        # Q: (B, T, QH, D)  K/V: (B, T, KVH, D)
         q = q.view(B, T, self.num_query_heads, self.head_dim)
         k = k.view(B, T, self.num_kv_heads, self.head_dim)
         v = v.view(B, T, self.num_kv_heads, self.head_dim)
-        end_pos = start_pos + T
 
         # RoPE (correct for KV cache)
         if rope:
-            freq = self._precompute_theta_position_frequency(self.head_dim, end_pos, device=x.device,theta=theta)
-            q = _apply_rotary_position_embedding(
-                q, freq[start_pos:end_pos]
-            )
-            k = _apply_rotary_position_embedding(
-                k, freq[start_pos:end_pos]
-            )
+            freq = self._precompute_theta_position_frequency(self.head_dim, end_pos, device=x.device, theta=theta)
+            q = _apply_rotary_position_embedding(q, freq[start_pos:end_pos])
+            k = _apply_rotary_position_embedding(k, freq[start_pos:end_pos])
 
-        # Write KV cache
-        self.cache_keys[:B, start_pos:end_pos] = k.detach()
-        self.cache_values[:B, start_pos:end_pos] = v.detach()
+        # Write KV cache — detach only at inference to avoid blocking gradients
+        _k_to_store = k.detach() if not torch.is_grad_enabled() else k
+        _v_to_store = v.detach() if not torch.is_grad_enabled() else v
+        self.cache_keys[:B, start_pos:end_pos] = _k_to_store
+        self.cache_values[:B, start_pos:end_pos] = _v_to_store
 
         # Read full KV
-        k_full = self.cache_keys[:B, :end_pos].detach()   # (B, S, KVH, D)
-        v_full = self.cache_values[:B, :end_pos].detach()
+        k_full = self.cache_keys[:B, :end_pos]
+        v_full = self.cache_values[:B, :end_pos]
+        if torch.is_grad_enabled():
+            k_full = k_full.detach().clone()
+            k_full[:B, start_pos:end_pos] = _k_to_store
+            v_full = v_full.detach().clone()
+            v_full[:B, start_pos:end_pos] = _v_to_store
 
         # Transpose to attention format
         q = q.transpose(1, 2)            # (B, QH, T, D)
