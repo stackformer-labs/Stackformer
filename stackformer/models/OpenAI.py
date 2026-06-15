@@ -75,6 +75,7 @@ class GPT_1(nn.Module):
         dtype:       torch.dtype   = torch.float32,
     ):
         super().__init__()
+        assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
         self.seq_len = seq_len
 
         cfg = BlockConfig(
@@ -168,6 +169,7 @@ class GPT_2(nn.Module):
         dtype:       torch.dtype   = torch.float32,
     ):
         super().__init__()
+        assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
         self.seq_len = seq_len
 
         cfg = BlockConfig(

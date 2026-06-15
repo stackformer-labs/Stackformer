@@ -82,6 +82,7 @@ class llama_1(nn.Module):
         dtype:       torch.dtype = torch.float32,
     ):
         super().__init__()
+        assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
         self.seq_len = seq_len
 
         cfg = BlockConfig(
@@ -215,6 +216,9 @@ class llama_2(nn.Module):
         device:           str         = "cpu",
     ):
         super().__init__()
+        assert embed_dim % num_query_heads == 0, "embed_dim must be divisible by num_query_heads"
+        assert num_query_heads % num_kv_heads == 0, "num_query_heads must be divisible by num_kv_heads"
+
         self.seq_len = kv_seq_len
         
         # in llama_2.__init__(), before BlockConfig
