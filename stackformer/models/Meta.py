@@ -218,8 +218,8 @@ class llama_2(nn.Module):
         self.seq_len = kv_seq_len
         
         # in llama_2.__init__(), before BlockConfig
-        # if hidden_dim == 0:
-        #     'hidden_dim = int(int(8 / 3 * embed_dim) / 256) * 256 # 8/3 is the LLaMA 2 expansion ratio, and we round to a multiple of 256 for efficiency
+        if hidden_dim == 0:
+            hidden_dim = int(int(8 / 3 * embed_dim) / 256) * 256 # 8/3 is the LLaMA 2 expansion ratio, and we round to a multiple of 256 for efficiency
     
         # BlockConfig drives FFN and norm — attention is set separately    
         cfg = BlockConfig(
