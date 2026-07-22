@@ -255,8 +255,8 @@ def _build_pos_embedding(
     hw = dict(device=cfg.device, dtype=cfg.dtype)
 
     registry: dict[str, nn.Module] = {
-        "sinusoidal": SinusoidalPositionalEmbedding(cfg.embed_dim, max_seq_len, **hw),
-        "absolute":   AbsolutePositionEmbedding(cfg.embed_dim, max_seq_len, **hw),
+        "sinusoidal": SinusoidalPositionalEmbedding(max_seq_len, cfg.embed_dim, **hw),
+        "absolute":   AbsolutePositionEmbedding(max_seq_len, cfg.embed_dim, **hw),
     }
     key = name.lower()
     if key not in registry:
