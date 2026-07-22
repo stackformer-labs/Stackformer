@@ -54,11 +54,11 @@ class LayerNormalization(nn.Module):
         self.bias = nn.Parameter(torch.zeros(embed_dim,device=self.device,dtype=self.dtype))   # beta
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        mean = x.mean(dim=-1, keepdim=True).to(self.device)
-        var = x.var(dim=-1, keepdim=True, unbiased=False).to(self.device)
+        mean = x.mean(dim=-1, keepdim=True)
+        var = x.var(dim=-1, keepdim=True, unbiased=False)
         normalized_x = (x - mean) / torch.sqrt(var + self.eps)
         output = self.weight * normalized_x + self.bias
-        return output.to(device=self.device, dtype=self.dtype)
+        return output
 
 class RMSNormalization(nn.Module):
     """RMSNorm over the last tensor dimension (no mean subtraction).
@@ -97,7 +97,7 @@ class RMSNormalization(nn.Module):
         self.weight = nn.Parameter(torch.ones(embed_dim, device=self.device,dtype=self.dtype))  # gamma
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        rms = x.pow(2).mean(-1, keepdim=True).sqrt().to(device=self.device)
-        normalized_x = x / (rms + self.eps).to(device=self.device)
+        rms = (x.pow(2).mean(-1, keepdim=True) + self.eps).sqrt()
+        normalized_x = x / (rms + self.eps)
         output = self.weight * normalized_x
-        return output.to(device=self.device, dtype=self.dtype)
+        return output
