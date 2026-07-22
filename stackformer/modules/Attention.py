@@ -508,33 +508,40 @@ class Multi_query_Attention(nn.Module):
     def forward(self, x, mask=True):
         B, T, C = x.shape
 
-        # Project input to queries (multi-head) and shared keys/values (single head)
-        q = self.q_proj(x)  # (B, T, C)
-        k = self.k_proj(x)  # (B, T, C)
-        v = self.v_proj(x)  # (B, T, C)
-        
-        # Reshape queries to multi-head: (B, T, C) -> (B, num_heads, T, head_dim)
+        # Project
+        q = self.q_proj(x)                    # (B, T, C)
+        k = self.k_proj(x)                    # (B, T, D)
+        v = self.v_proj(x)                    # (B, T, D)
+
+        # Multi-head queries
         q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
 
-        # Expand shared k/v across heads: (B, T, head_dim) -> (B, 1, T, head_dim)
-        # Then broadcast to (B, num_heads, T, head_dim)
-        k = k.unsqueeze(1).expand(B, self.num_heads, T, self.head_dim)
-        v = v.unsqueeze(1).expand(B, self.num_heads, T, self.head_dim)
-        
-        causal_mask = None
-        # Apply causal mask if needed
+        # Shared K/V
+        k = k.unsqueeze(1)                    # (B, 1, T, D)
+        v = v.unsqueeze(1)                    # (B, 1, T, D)
+
+        # Broadcast to all query heads (no memory allocation)
+        k = k.expand(-1, self.num_heads, -1, -1)
+        v = v.expand(-1, self.num_heads, -1, -1)
+
+        attn_mask = None
         if mask:
-            causal_mask = self._get_or_create_mask(seq_len=T, device=x.device)  # (T, T)
+            attn_mask = self._get_or_create_mask(
+                seq_len=T,
+                device=x.device,
+            )
 
         out = _run_sdpa(
-            q, k, v,
-            attn_mask = causal_mask,
-            dropout_p=self.dropout_p
+            q,
+            k,
+            v,
+            attn_mask=attn_mask,
+            dropout_p=self.dropout_p,
         )
-        
-        out = out.transpose(1, 2).contiguous().view(B, T, C)
 
-        return self.out_proj(out)  # Final linear projection
+        out = out.transpose(1, 2).reshape(B, T, C)
+
+        return self.out_proj(out)
     
 class Multi_query_Attention_With_RoPE(nn.Module):
     """MQA with RoPE on queries and shared keys.
@@ -595,40 +602,57 @@ class Multi_query_Attention_With_RoPE(nn.Module):
     def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, device: torch.device,theta: float = 10000.0):
         return _build_rope_frequency(head_dim, seq_len, device, self.dtype, theta=theta)
     
-    def forward(self, x, mask=True, theta: float=10000.0):
+    def forward(self, x, mask=True, theta: float = 10000.0):
         B, T, C = x.shape
 
-        # Project input to queries (multi-head) and shared keys/values (single head)
-        q = self.q_proj(x)  # (B, T, C)
-        k = self.k_proj(x)  # (B, T, C)
-        v = self.v_proj(x)  # (B, T, C)
-        
-        # Reshape queries to multi-head: (B, T, C) -> (B, num_heads, T, head_dim)
-        q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        # Project
+        q = self.q_proj(x)                    # (B, T, C)
+        k = self.k_proj(x)                    # (B, T, D)
+        v = self.v_proj(x)                    # (B, T, D)
 
-        # Expand shared k/v across heads: (B, T, head_dim) -> (B, 1, T, head_dim)
-        # Then broadcast to (B, num_heads, T, head_dim)
-        k = k.unsqueeze(1).expand(B, self.num_heads, T, self.head_dim)
-        v = v.unsqueeze(1).expand(B, self.num_heads, T, self.head_dim)
-        
-        freq = self._precompute_theta_position_frequency(self.head_dim, T, device=x.device,theta=theta)
-        q = _apply_rotary_position_embedding(q, freq)
-        k = _apply_rotary_position_embedding(k, freq)
-        
-        causal_mask = None
-        # Apply causal mask if needed
-        if mask:
-            causal_mask = self._get_or_create_mask(seq_len=T, device=x.device)  # (T, T)
+        # Reshape
+        q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)  # (B, H, T, D)
 
-        out = _run_sdpa(
-            q, k, v,
-            attn_mask = causal_mask,
-            dropout_p=self.dropout_p
+        # Single KV head
+        k = k.unsqueeze(1)  # (B, 1, T, D)
+        v = v.unsqueeze(1)  # (B, 1, T, D)
+
+        # RoPE
+        freq = self._precompute_theta_position_frequency(
+            self.head_dim,
+            T,
+            device=x.device,
+            theta=theta,
         )
 
-        out = out.transpose(1, 2).contiguous().view(B, T, C)
+        q = _apply_rotary_position_embedding(q, freq)
+        k = _apply_rotary_position_embedding(k, freq)
 
-        return self.out_proj(out)  # Final linear projection
+        # Broadcast KV to all query heads (no memory copy)
+        k = k.expand(-1, self.num_heads, -1, -1)
+        v = v.expand(-1, self.num_heads, -1, -1)
+
+        # Causal mask
+        attn_mask = None
+        if mask:
+            attn_mask = self._get_or_create_mask(
+                seq_len=T,
+                device=x.device,
+            )
+
+        # SDPA
+        out = _run_sdpa(
+            q,
+            k,
+            v,
+            attn_mask=attn_mask,
+            dropout_p=self.dropout_p,
+        )
+
+        # Merge heads
+        out = out.transpose(1, 2).reshape(B, T, C)
+
+        return self.out_proj(out)
 
 class Group_query_Attention(nn.Module):
     """Grouped-Query Attention (GQA): intermediate between MHA and MQA.
@@ -868,13 +892,14 @@ class kv_cache_multihead(nn.Module):
         # included in state_dict. persistent=False keeps them out of checkpoints
         # (they are transient inference state, not learned parameters).
         self.register_buffer(
-            "cache_keys",
-            torch.zeros(batch_size, kv_seq_len * 2, num_heads, self.head_dim, dtype=dtype),
-            persistent=False,
+        "cache_keys",
+        torch.empty(batch_size,num_heads,kv_seq_len,self.head_dim,device=self.device,dtype=self.dtype,),
+        persistent=False,
         )
+
         self.register_buffer(
             "cache_values",
-            torch.zeros(batch_size, kv_seq_len * 2, num_heads, self.head_dim, dtype=dtype),
+            torch.empty(batch_size,num_heads,kv_seq_len,self.head_dim,device=self.device,dtype=self.dtype,),
             persistent=False,
         )
         self.kv_seq_len = kv_seq_len
@@ -895,13 +920,13 @@ class kv_cache_multihead(nn.Module):
 
         return self._causal_mask_cache[key]
 
-    def forward(self, x: torch.Tensor, start_pos: int, mask: bool = True, rope: bool = True, theta: float = 10000.0):
+    def forward(self, x: torch.Tensor, start_pos: int = 0, mask: bool = True, rope: bool = True, theta: float = 10000.0):
         B, T, C = x.shape
         assert C == self.embed_dim, "Input embed_dim mismatch"
         end_pos = start_pos + T
-        assert end_pos <= self.cache_keys.shape[1], (
+        assert end_pos <= self.kv_seq_len, (
             f"KV cache capacity exceeded: start_pos={start_pos} + T={T} = {end_pos} "
-            f"> cache length {self.cache_keys.shape[1]}"
+            f"> cache length {self.kv_seq_len}"
         )
 
         # Project Q, K, V
@@ -910,9 +935,10 @@ class kv_cache_multihead(nn.Module):
         v = self.v_proj(x)
 
         # Reshape to multi-head
-        q = q.view(B, T, self.num_heads, self.head_dim)
-        k = k.view(B, T, self.num_heads, self.head_dim)
-        v = v.view(B, T, self.num_heads, self.head_dim)
+        q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2) # (B, H, T, D)
+        k = k.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        v = v.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
+        
 
         # Rotary Position Embedding (correct for KV cache)
         if rope:
@@ -925,25 +951,20 @@ class kv_cache_multihead(nn.Module):
         # during training (torch.is_grad_enabled() is False inside torch.no_grad())
         _k_to_store = k.detach() if not torch.is_grad_enabled() else k
         _v_to_store = v.detach() if not torch.is_grad_enabled() else v
-        self.cache_keys[:B, start_pos:end_pos] = _k_to_store
-        self.cache_values[:B, start_pos:end_pos] = _v_to_store
 
+        self.cache_keys[:B, :, start_pos:end_pos] = _k_to_store
+        self.cache_values[:B, :, start_pos:end_pos] = _v_to_store
+        
         # Read full cached KV
-        k_full = self.cache_keys[:B, :end_pos]
-        v_full = self.cache_values[:B, :end_pos]
+        k_full = self.cache_keys[:B, :, :end_pos]
+        v_full = self.cache_values[:B, :, :end_pos]
         if torch.is_grad_enabled():
             # Detach the prefix positions (already committed in prior steps);
             # only the current chunk participates in the gradient graph.
             k_full = k_full.detach().clone()
-            k_full[:B, start_pos:end_pos] = _k_to_store
             v_full = v_full.detach().clone()
-            v_full[:B, start_pos:end_pos] = _v_to_store
-
-        # Transpose to SDPA format        
-        q = q.transpose(1, 2)           # (B, H, T, D)
-        k_full = k_full.transpose(1, 2)  # (B, H, S, D)
-        v_full = v_full.transpose(1, 2)
-
+            k_full[:, :, start_pos:end_pos] = _k_to_store
+            v_full[:, :, start_pos:end_pos] = _v_to_store
         
         # Rectangular causal mask (T,S)
         attn_mask = None
@@ -951,7 +972,7 @@ class kv_cache_multihead(nn.Module):
             attn_mask = self._get_or_create_kv_mask(T, end_pos, start_pos, device=x.device)
 
         # Scaled Dot Product Attention (Flash / MemEff)        
-        context = _run_sdpa(
+        context = F.scaled_dot_product_attention(
             q,
             k_full,
             v_full,
@@ -1019,12 +1040,12 @@ class kv_cache_group_query(nn.Module):
         # included in state_dict. persistent=False keeps them out of checkpoints.
         self.register_buffer(
             "cache_keys",
-            torch.zeros(batch_size, kv_seq_len * 2, num_kv_heads, self.head_dim, dtype=dtype),
+            torch.empty(batch_size, num_kv_heads, kv_seq_len, self.head_dim, device=self.device, dtype=self.dtype),
             persistent=False,
         )
         self.register_buffer(
             "cache_values",
-            torch.zeros(batch_size, kv_seq_len * 2, num_kv_heads, self.head_dim, dtype=dtype),
+            torch.empty(batch_size, num_kv_heads, kv_seq_len, self.head_dim, device=self.device, dtype=self.dtype),
             persistent=False,
         )
 
@@ -1043,12 +1064,12 @@ class kv_cache_group_query(nn.Module):
 
         return self._causal_mask_cache[key]
 
-    def forward(self, x, start_pos, mask=True, rope=True, theta: float = 10000.0):
+    def forward(self, x, start_pos=0, mask=True, rope=True, theta: float = 10000.0):
         B, T, C = x.shape
         end_pos = start_pos + T
-        assert end_pos <= self.cache_keys.shape[1], (
+        assert end_pos <= self.kv_seq_len, (
             f"KV cache capacity exceeded: start_pos={start_pos} + T={T} = {end_pos} "
-            f"> cache length {self.cache_keys.shape[1]}"
+            f"> cache length {self.kv_seq_len}"
         )
 
         # Project Q, K, V
@@ -1057,35 +1078,31 @@ class kv_cache_group_query(nn.Module):
         v = self.v_proj(x)
         # Reshape
         # Q: (B, T, QH, D)  K/V: (B, T, KVH, D)
-        q = q.view(B, T, self.num_query_heads, self.head_dim)
-        k = k.view(B, T, self.num_kv_heads, self.head_dim)
-        v = v.view(B, T, self.num_kv_heads, self.head_dim)
-
+        q = q.view(B, T, self.num_query_heads, self.head_dim).transpose(1, 2)
+        k = k.view(B, T, self.num_kv_heads, self.head_dim).transpose(1, 2)
+        v = v.view(B, T, self.num_kv_heads, self.head_dim).transpose(1, 2)
+        
         # RoPE (correct for KV cache)
         if rope:
-            freq = self._precompute_theta_position_frequency(self.head_dim, end_pos, device=x.device, theta=theta)
-            q = _apply_rotary_position_embedding(q, freq[start_pos:end_pos])
-            k = _apply_rotary_position_embedding(k, freq[start_pos:end_pos])
+            freq = self._precompute_theta_position_frequency(self.head_dim,end_pos,device=x.device,theta=theta,)
+            q = _apply_rotary_position_embedding(q,freq[start_pos:end_pos],)
+            k = _apply_rotary_position_embedding(k,freq[start_pos:end_pos],)
 
         # Write KV cache — detach only at inference to avoid blocking gradients
         _k_to_store = k.detach() if not torch.is_grad_enabled() else k
         _v_to_store = v.detach() if not torch.is_grad_enabled() else v
-        self.cache_keys[:B, start_pos:end_pos] = _k_to_store
-        self.cache_values[:B, start_pos:end_pos] = _v_to_store
+        self.cache_keys[:B, :, start_pos:end_pos] = _k_to_store
+        self.cache_values[:B, :, start_pos:end_pos] = _v_to_store
 
         # Read full KV
-        k_full = self.cache_keys[:B, :end_pos]
-        v_full = self.cache_values[:B, :end_pos]
+        k_full = self.cache_keys[:B, :, :end_pos]
+        v_full = self.cache_values[:B, :, :end_pos]
         if torch.is_grad_enabled():
             k_full = k_full.detach().clone()
-            k_full[:B, start_pos:end_pos] = _k_to_store
-            v_full = v_full.detach().clone()
-            v_full[:B, start_pos:end_pos] = _v_to_store
+            k_full[:, :, start_pos:end_pos] = _k_to_store
 
-        # Transpose to attention format
-        q = q.transpose(1, 2)            # (B, QH, T, D)
-        k_full = k_full.transpose(1, 2)  # (B, KVH, S, D)
-        v_full = v_full.transpose(1, 2)
+            v_full = v_full.detach().clone()
+            v_full[:, :, start_pos:end_pos] = _v_to_store
 
         # Expand KV heads to match Q heads (GQA)
         k_full = k_full.repeat_interleave(self.num_queries_per_kv, dim=1)
