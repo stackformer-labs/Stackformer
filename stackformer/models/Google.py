@@ -17,10 +17,8 @@ from stackformer.modules.layer import BlockConfig, TransformerEncoder
 from stackformer.generate import text_generate
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Gemma 1 2B
-# ─────────────────────────────────────────────────────────────────────────────
 
+# Gemma 1 2B
 class gemma_1_2b(nn.Module):
     """Gemma 1 2B-style decoder-only causal language model.
 
@@ -109,10 +107,8 @@ class gemma_1_2b(nn.Module):
                              temperature, top_k, top_p, eos_token_id)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Gemma 1 7B
-# ─────────────────────────────────────────────────────────────────────────────
 
+# Gemma 1 7B
 class gemma_1_7b(nn.Module):
     """Gemma 1 7B-style decoder-only causal language model.
 

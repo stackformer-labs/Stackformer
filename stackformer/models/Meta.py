@@ -25,10 +25,7 @@ from stackformer.modules.Attention import kv_cache_group_query
 from stackformer.generate import text_generate
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # LLaMA 1
-# ─────────────────────────────────────────────────────────────────────────────
-
 class llama_1(nn.Module):
     """LLaMA 1-style decoder-only causal language model.
 
@@ -116,10 +113,8 @@ class llama_1(nn.Module):
                              temperature, top_k, top_p, eos_token_id)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# LLaMA 2  (stateful KV cache — needs its own block wiring)
-# ─────────────────────────────────────────────────────────────────────────────
 
+# LLaMA 2  (stateful KV cache — needs its own block wiring)
 class _llama_2_Block(nn.Module):
     """One LLaMA 2 decoder block with GQA + persistent KV cache.
 

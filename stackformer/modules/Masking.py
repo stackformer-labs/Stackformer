@@ -147,7 +147,7 @@ def global_mask(seq_len: int, global_index: List[int]) -> torch.Tensor:
     return mask
 
 
-def full_mask(seq_len: int) -> torch.Tensor:
+def no_mask(seq_len: int) -> torch.Tensor:
     """
     Full bidirectional attention — every position is visible.
 
@@ -183,7 +183,7 @@ def mistral(seq_len: int, window_size: int, dilation: int) -> torch.Tensor:
 MASK_REGISTRY: Dict[str, Callable] = {
     "causal":         causal,
     "sliding_window": sliding_window,
-    "full":           full_mask,
+    "no":             no_mask,
     "dilated_causal": dilated_causal,
     "random_mask":    random_mask,
     "global_mask":    global_mask,

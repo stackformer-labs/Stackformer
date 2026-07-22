@@ -43,3 +43,6 @@ stackformer/datasets/
 
 # tokenizer
 stackformer/modules/tokenizer.py
+
+# Review
+reviews/*

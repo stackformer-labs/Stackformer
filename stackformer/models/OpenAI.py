@@ -16,10 +16,8 @@ from stackformer.modules.position_embedding import AbsolutePositionEmbedding
 from stackformer.generate import text_generate
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# GPT-1
-# ─────────────────────────────────────────────────────────────────────────────
 
+# GPT-1
 class GPT_1(nn.Module):
     """GPT-1 style decoder-only causal language model.
 
@@ -109,10 +107,7 @@ class GPT_1(nn.Module):
         return text_generate(self, *args, **kwargs)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # GPT-2
-# ─────────────────────────────────────────────────────────────────────────────
-
 class GPT_2(nn.Module):
     """GPT-2 style decoder-only causal language model.
 
