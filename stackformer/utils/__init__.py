@@ -1,5 +1,6 @@
 """General and device utility helpers."""
 
+from .ff_utils import hidden_dim_helper
 from .device import clear_cuda_cache, format_memory, get_device, move_to_device, print_device_info, synchronize
 from .utils import (
     count_parameters,
@@ -14,6 +15,7 @@ from .utils import (
 from .attn_utils import _run_sdpa, _normalize_mask_type, _get_attention_mask
 
 __all__ = [
+    "hidden_dim_helper",
     "get_device",
     "print_device_info",
     "clear_cuda_cache",

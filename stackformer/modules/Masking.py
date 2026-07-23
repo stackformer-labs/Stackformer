@@ -108,15 +108,16 @@ def random_mask(seq_len: int, num_random: int) -> torch.Tensor:
             False = masked
     """
     # Start fully masked; selectively open chosen past positions.
+    rows = torch.arange(seq_len).repeat_interleave(num_random)
+    cols = (
+        torch.rand(seq_len, seq_len)
+        .tril()
+        .topk(num_random, dim=1)
+        .indices
+    )
+
     mask = torch.zeros(seq_len, seq_len, dtype=torch.bool)
-
-    for i in range(seq_len):
-        candidates = list(range(i + 1))          # self + all past tokens
-        k   = min(num_random, len(candidates))
-        idx = torch.randperm(len(candidates))[:k]
-        selected = torch.tensor(candidates)[idx]
-        mask[i, selected] = True                 # mark as visible
-
+    mask.scatter_(1, cols, True)
     return mask
 
 

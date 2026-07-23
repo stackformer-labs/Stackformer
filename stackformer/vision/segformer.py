@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from stackformer.modules.Feed_forward import FF_GELU
 import math
 
 """SegFormer-B0 implementation for semantic segmentation.
@@ -60,8 +61,8 @@ class Multi_Head_Attention(nn.Module):
 
     def forward(self, x):
         B, N, C = x.shape
-        x = x.to(device=self.device, dtype=self.dtype)
-
+        assert x.device == self.device and x.dtype == self.dtype, "Input tensor must match the specified device and dtype"
+        
         q = self.q_proj(x)  # (B, N, C)
         
         if self.reduction > 1:
@@ -86,22 +87,6 @@ class Multi_Head_Attention(nn.Module):
         out = out.transpose(1, 2).contiguous().view(B, q.size(2), C)
 
         return self.out_proj(out)
-
-# Feed forward layer
-class FF_GELU(nn.Module):
-    def __init__(self, embed_dim, hidden_dim, dropout=0.0, device='cpu', dtype=torch.float32):
-        super().__init__()
-        
-        self.gelu = nn.Sequential(
-            nn.Linear(embed_dim, hidden_dim, bias=True,device=device, dtype=dtype),
-            nn.GELU(), 
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, embed_dim, bias=True,device=device, dtype=dtype),
-            nn.Dropout(dropout),
-        )
-    
-    def forward(self, x):
-        return self.gelu(x)
 
 # Transformer encoding block
 class transformer_block(nn.Module):

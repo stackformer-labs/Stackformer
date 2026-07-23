@@ -135,6 +135,7 @@ class Self_Attention(nn.Module):
 
     def forward(self, x, mask=True):
         B, T, C = x.shape
+        assert x.device == self.device and x.dtype == self.dtype, "Input tensor must match the specified device and dtype"
 
         # Project Q, K, V
         q = self.q_proj(x)
@@ -229,6 +230,7 @@ class Multi_Head_Attention(nn.Module):
 
     def forward(self, x, mask=True):
         B, T, C = x.shape
+        assert x.device == self.device and x.dtype == self.dtype, "Input tensor must match the specified device and dtype"
 
         q = self.q_proj(x)  # (B, T, C)
         k = self.k_proj(x) 
@@ -323,6 +325,7 @@ class Multi_Head_Attention_With_RoPE(nn.Module):
 
     def forward(self, x, mask=True, theta: float=10000.0):
         B, T, C = x.shape
+        assert x.device == self.device and x.dtype == self.dtype, "Input tensor must match the specified device and dtype"
 
         q = self.q_proj(x)  # (B, T, C)
         k = self.k_proj(x) 
@@ -413,6 +416,7 @@ class Cross_MultiHead_Attention(nn.Module):
 
     def forward(self, x, context, mask=False, attn_mask: torch.Tensor | None = None):
         B, T, C = x.shape
+        assert x.device == self.device and x.dtype == self.dtype, "Input tensor must match the specified device and dtype"
         S = context.size(1)  # Length of context sequence
 
         # Move inputs to the correct device and dtype
@@ -507,6 +511,7 @@ class Multi_query_Attention(nn.Module):
 
     def forward(self, x, mask=True):
         B, T, C = x.shape
+        assert x.device == self.device and x.dtype == self.dtype, "Input tensor must match the specified device and dtype"
 
         # Project
         q = self.q_proj(x)                    # (B, T, C)
@@ -604,6 +609,7 @@ class Multi_query_Attention_With_RoPE(nn.Module):
     
     def forward(self, x, mask=True, theta: float = 10000.0):
         B, T, C = x.shape
+        assert x.device == self.device and x.dtype == self.dtype, "Input tensor must match the specified device and dtype"
 
         # Project
         q = self.q_proj(x)                    # (B, T, C)
@@ -713,6 +719,7 @@ class Group_query_Attention(nn.Module):
 
     def forward(self, x, mask=True):
         B, T, C = x.shape
+        assert x.device == self.device and x.dtype == self.dtype, "Input tensor must match the specified device and dtype"
 
         # Project Q, K, V
         q = self.q_proj(x)  # (B, T, C)
@@ -808,6 +815,7 @@ class Group_query_Attention_With_RoPE(nn.Module):
     
     def forward(self, x, mask=True, theta: float=10000.0):
         B, T, C = x.shape
+        assert x.device == self.device and x.dtype == self.dtype, "Input tensor must match the specified device and dtype"
 
         # Project Q, K, V
         q = self.q_proj(x)  # (B, T, C)
@@ -819,13 +827,14 @@ class Group_query_Attention_With_RoPE(nn.Module):
         k = k.view(B, T, self.num_kv_heads, self.head_dim).transpose(1, 2)     # (B, num_kv_heads, T, head_dim)
         v = v.view(B, T, self.num_kv_heads, self.head_dim).transpose(1, 2)
 
+        freq = self._precompute_theta_position_frequency(self.head_dim, T, device=x.device,theta=theta)
+        q = _apply_rotary_position_embedding(q, freq)
+        k = _apply_rotary_position_embedding(k, freq)
+        
         # Repeat keys and values for each query head group
         k = k.repeat_interleave(self.num_queries_per_kv, dim=1)  # (B, num_query_heads, T, head_dim)
         v = v.repeat_interleave(self.num_queries_per_kv, dim=1)
         
-        freq = self._precompute_theta_position_frequency(self.head_dim, T, device=x.device,theta=theta)
-        q = _apply_rotary_position_embedding(q, freq)
-        k = _apply_rotary_position_embedding(k, freq)
         
         causal_mask = None
         # Apply causal mask if needed
@@ -922,6 +931,7 @@ class kv_cache_multihead(nn.Module):
 
     def forward(self, x: torch.Tensor, start_pos: int = 0, mask: bool = True, rope: bool = True, theta: float = 10000.0):
         B, T, C = x.shape
+        assert x.device == self.device and x.dtype == self.dtype, "Input tensor must match the specified device and dtype"
         assert C == self.embed_dim, "Input embed_dim mismatch"
         end_pos = start_pos + T
         assert end_pos <= self.kv_seq_len, (
@@ -1066,6 +1076,7 @@ class kv_cache_group_query(nn.Module):
 
     def forward(self, x, start_pos=0, mask=True, rope=True, theta: float = 10000.0):
         B, T, C = x.shape
+        assert x.device == self.device and x.dtype == self.dtype, "Input tensor must match the specified device and dtype"
         end_pos = start_pos + T
         assert end_pos <= self.kv_seq_len, (
             f"KV cache capacity exceeded: start_pos={start_pos} + T={T} = {end_pos} "

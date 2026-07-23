@@ -93,14 +93,14 @@ class Trainer:
         if model is None:
             raise ValueError("`model` must be provided.")
 
-        self.model = model
+        self.device = get_device(device) if device == "auto" else torch.device(device)
+        self.model = model.to(self.device)
+        self.optimizer = optimizer
         self.train_loader = train_dataloader
         self.val_loader = val_dataloader
-        self.optimizer = optimizer
         self.scheduler = scheduler
         self.criterion = criterion or language_modeling_cross_entropy
 
-        self.device = device
         self.seed = seed
         cfg = training_config or TrainingConfig(
             max_epochs=max_epochs,
@@ -145,6 +145,7 @@ class Trainer:
         self._setup_device()
         self._setup_scaler()
         self._setup_optimizer()
+        self._validate_optimizer_device()
         self._setup_scheduler()
         self._setup_monitor()
         self._setup_checkpoint_manager()
@@ -184,14 +185,26 @@ class Trainer:
             print_once(f"[Trainer] Distributed initialization skipped: {exc}")
 
     def _setup_device(self) -> None:
-        if self.device == "auto":
-            self.device = get_device()
-
-        self.model.to(self.device)
         if self.use_ddp and is_distributed():
             self.model = wrap_model_ddp(self.model)
         print_device_info()
 
+    def _validate_optimizer_device(self):
+        if self.optimizer is None:
+            return
+
+        model_device = next(self.model.parameters()).device
+
+        for group in self.optimizer.param_groups:
+            for param in group["params"]:
+                if param.device != model_device:
+                    raise ValueError(
+                        "The supplied optimizer references parameters on "
+                        f"{param.device}, but the model is on "
+                        f"{model_device}.\n\n"
+                        "Move the model before creating the optimizer, or "
+                        "let Trainer create the optimizer."
+                    )
 
     def _setup_scaler(self) -> None:
         if self.scaler is not None:
@@ -233,29 +246,92 @@ class Trainer:
     def _setup_checkpoint_manager(self) -> None:
         self.checkpoint_manager = CheckpointManager(output_dir=self.checkpoint_dir, device=self.device)
 
-    def _build_resume_dataloader(self, dataloader: Optional[DataLoader]) -> Optional[DataLoader]:
+    def _build_resume_dataloader(
+        self,
+        dataloader: Optional[DataLoader],
+    ) -> Optional[DataLoader]:
+        """
+        Rebuild a dataloader for checkpoint resumption.
+
+        For deterministic shuffled dataloaders, this reconstructs the same
+        permutation by reseeding a Generator with ``seed + epoch`` and skips
+        samples already processed.
+
+        Exact resumption is only supported when:
+
+        - Trainer was created with ``seed=...``
+        - DataLoader uses RandomSampler (shuffle=True)
+        - No custom sampler is supplied
+
+        Otherwise, the loader falls back to sequential resumption.
+        """
         if dataloader is None or self.state.batch_idx == 0:
             return dataloader
 
         dataset = dataloader.dataset
         batch_size = dataloader.batch_size
+
         if batch_size is None:
             return dataloader
 
         start_sample = self.state.batch_idx * batch_size
+
         if start_sample >= len(dataset):
             return dataloader
 
-        subset = Subset(dataset, range(start_sample, len(dataset)))
-        resumed_loader = DataLoader(
-            subset,
-            batch_size=batch_size,
-            shuffle=False,
-            num_workers=getattr(dataloader, "num_workers", 0),
-            pin_memory=getattr(dataloader, "pin_memory", False),
-            drop_last=getattr(dataloader, "drop_last", False),
+        sampler = getattr(dataloader, "sampler", None)
+
+        # Case 1: RandomSampler (shuffle=True)
+        if (
+            self.seed is not None
+            and isinstance(sampler, torch.utils.data.RandomSampler)
+            and sampler.replacement is False
+        ):
+            generator = torch.Generator()
+            generator.manual_seed(self.seed + self.state.epoch)
+
+            permutation = torch.randperm(
+                len(dataset),
+                generator=generator,
+            ).tolist()
+
+            remaining_indices = permutation[start_sample:]
+
+            resumed_loader = DataLoader(dataset, batch_size=batch_size, sampler=torch.utils.data.SubsetRandomSampler(
+                    remaining_indices),
+                num_workers=dataloader.num_workers, pin_memory=dataloader.pin_memory, drop_last=dataloader.drop_last,
+                collate_fn=dataloader.collate_fn,
+                persistent_workers=getattr(
+                    dataloader,
+                    "persistent_workers",
+                    False,
+                ),
+            )
+
+            print_once(
+                f"[Trainer] Resuming shuffled dataloader "
+                f"from sample {start_sample}/{len(dataset)}"
+            )
+
+            return resumed_loader
+
+        # Case 2: Sequential fallback        
+        subset = Subset(dataset,range(start_sample, len(dataset)),)
+
+        resumed_loader = DataLoader(subset,batch_size=batch_size,shuffle=False,num_workers=dataloader.num_workers,
+            pin_memory=dataloader.pin_memory, drop_last=dataloader.drop_last, collate_fn=dataloader.collate_fn,
+            persistent_workers=getattr(
+                dataloader,
+                "persistent_workers",
+                False,
+            ),
         )
-        print_once(f"[Trainer] Resuming dataloader from sample {start_sample}/{len(dataset)}")
+
+        print_once(
+            "[Trainer] Warning: exact shuffle resumption is not "
+            "available for this DataLoader. Falling back to "
+            "sequential resume."
+        )
         return resumed_loader
 
     def fit(self) -> None:
@@ -305,6 +381,7 @@ class Trainer:
             "epoch": self.state.epoch,
             "global_step": self.state.global_step,
             "batch_idx": self.state.batch_idx,
+            "seed": self.seed,
             "jit_model_path": jit_path,
         }
         self.checkpoint_manager.save(state, name)
@@ -318,6 +395,8 @@ class Trainer:
         }
         metadata = self.checkpoint_manager.load(checkpoint_path, state)
         self.state.load_metadata(metadata)
+        if "seed" in metadata:
+            self.seed = metadata["seed"]
         print_once(f"[Trainer] Resumed from {checkpoint_path}")
 
     def export_torchscript(self, name: str = "inference_model") -> str:

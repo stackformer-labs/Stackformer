@@ -33,11 +33,14 @@ from .modules import (
 )
 from .vision import SegFormerB0, ViT
 
+from .language import BERT, RoBERTa
+
 from .engine import Trainer
 
 __all__ = [
     "AbsolutePositionEmbedding",
     "BlockConfig",
+    "BERT",
     "Cross_MultiHead_Attention",
     "FF_GELU",
     "FF_GeGLU",
@@ -57,6 +60,7 @@ __all__ = [
     "Multi_query_Attention_With_RoPE",
     "RMSNormalization",
     "RoPE",
+    "RoBERTa",
     "SegFormerB0",
     "Self_Attention",
     "SinusoidalPositionalEmbedding",
@@ -75,6 +79,5 @@ __all__ = [
     "GenerationConfig",
     "ModelConfig",
     "TrainingConfig",
+    "Trainer",
 ]
-
-__all__.append("Trainer")
