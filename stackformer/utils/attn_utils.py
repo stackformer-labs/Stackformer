@@ -1,12 +1,17 @@
 """Attention module helpers."""
 
+from collections import OrderedDict
+
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+
 from stackformer.modules.Masking import make_mask
 
+# Maximum number of cached attention masks.
+_MAX_MASK_CACHE_SIZE = 32
 
-def _run_sdpa(q, k, v, attn_mask, dropout_p):
+
+def _run_sdpa(q, k, v, attn_mask, dropout_p,):
     """
     Wrapper around PyTorch's scaled dot-product attention (SDPA).
 
@@ -16,16 +21,11 @@ def _run_sdpa(q, k, v, attn_mask, dropout_p):
         q (Tensor): Query tensor of shape (B, H, T, D)
         k (Tensor): Key tensor of shape (B, H, T, D)
         v (Tensor): Value tensor of shape (B, H, T, D)
-        attn_mask (Tensor or None): Attention mask (broadcastable to SDPA format)
-        dropout_p (float): Dropout probability applied to attention weights
+        attn_mask (Tensor or None): Attention mask.
+        dropout_p (float): Attention dropout probability.
 
     Returns:
-        Tensor: Attention output of shape (B, H, T, D)
-
-    Notes:
-        - Uses torch.nn.functional.scaled_dot_product_attention
-        - `is_causal=False` because masking is handled explicitly via `attn_mask`
-        - Keeps behavior consistent across different attention implementations
+        Tensor: Attention output.
     """
     return F.scaled_dot_product_attention(
         q,
@@ -39,79 +39,100 @@ def _run_sdpa(q, k, v, attn_mask, dropout_p):
 
 def _normalize_mask_type(mask_type):
     """
-    Normalize user-provided mask_type into a standard list format.
-
-    This allows flexible user inputs while keeping internal logic consistent.
+    Normalize user-provided mask_type.
 
     Args:
-        mask_type (bool | str | list[str] | None):
-            - True  -> ["causal"]
-            - False/None -> None (no mask)
-            - str   -> [str]
-            - list/tuple -> list
+        mask_type:
+            True           -> ["causal"]
+            False / None   -> None
+            str            -> [str]
+            list / tuple   -> list
 
     Returns:
-        list[str] or None: Normalized mask types
-
-    Raises:
-        TypeError: If mask_type is of unsupported type
-
-    Example:
-        >>> _normalize_mask_type(True)
-        ["causal"]
-
-        >>> _normalize_mask_type("sliding_window")
-        ["sliding_window"]
+        list[str] | None
     """
     if mask_type is True:
         return ["causal"]
+
     if mask_type in (False, None):
         return None
+
     if isinstance(mask_type, str):
         return [mask_type]
+
     if isinstance(mask_type, (list, tuple)):
         return list(mask_type)
+
     raise TypeError("mask_type must be bool, str, or list of str")
 
 
-def _get_attention_mask(cache: dict, mask_type, seq_len: int, device, **mask_kwargs):
+def _canonical_device(device) -> torch.device:
     """
-    Retrieve or create an attention mask with caching.
+    Convert a device specification into a canonical torch.device.
 
-    Masks are expensive to construct repeatedly, especially for large sequence lengths.
-    This function caches masks based on configuration to avoid recomputation.
+    This ensures cache keys remain consistent between
+    'cuda' and 'cuda:0'.
+    """
+    device = torch.device(device)
+
+    if device.type == "cuda" and device.index is None:
+        current = torch.cuda.current_device() if torch.cuda.is_available() else 0
+        device = torch.device(f"cuda:{current}")
+
+    return device
+
+
+def _get_attention_mask(
+    cache: OrderedDict,
+    mask_type,
+    seq_len: int,
+    device,
+    **mask_kwargs,
+):
+    """
+    Retrieve or create a cached attention mask.
+
+    The cache is bounded using FIFO eviction to prevent
+    unbounded memory growth.
 
     Args:
-        cache (dict): Dictionary used to store previously created masks
-        mask_type (bool | str | list[str] | None): Type of mask(s) to apply
-        seq_len (int): Sequence length
-        device (torch.device): Device on which the mask should be created
-        **mask_kwargs: Additional arguments passed to `make_mask`
+        cache (OrderedDict):
+            Attention mask cache.
+        mask_type:
+            Mask specification.
+        seq_len (int):
+            Sequence length.
+        device:
+            Torch device.
+        **mask_kwargs:
+            Additional arguments forwarded to make_mask().
 
     Returns:
-        Tensor or None: Attention mask tensor or None if no masking is required
-
-    Notes:
-        - Cache key includes:
-            (seq_len, mask_types, device)
-        - Ensures masks are created on the correct device
-        - Prevents redundant computation across forward passes
-
-    Example:
-        >>> mask = _get_attention_mask(cache, "causal", 128, x.device)
+        Tensor | None
     """
     mask_types = _normalize_mask_type(mask_type)
+
     if mask_types is None:
         return None
 
-    key = (seq_len, tuple(mask_types), str(device))
+    device = _canonical_device(device)
+
+    key = (
+        seq_len,
+        tuple(mask_types),
+        device,
+    )
 
     if key not in cache:
+
+        if len(cache) >= _MAX_MASK_CACHE_SIZE:
+            cache.popitem(last=False)
+
         cache[key] = make_mask(
             mask_types,
             seq_len,
             device=device,
-            **mask_kwargs
+            **mask_kwargs,
         )
 
     return cache[key]

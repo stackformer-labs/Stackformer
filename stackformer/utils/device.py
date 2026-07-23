@@ -28,8 +28,8 @@ def get_device(device=None):
 def move_to_device(obj, device):
     """Recursively move tensors/collections to device."""
     if torch.is_tensor(obj):
-        non_blocking = str(device).startswith("cuda")
-        return obj.to(device, non_blocking=non_blocking)
+        device = torch.device(device)
+        return obj.to(device,non_blocking=(device.type == "cuda"),)
     if isinstance(obj, dict):
         return {k: move_to_device(v, device) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):

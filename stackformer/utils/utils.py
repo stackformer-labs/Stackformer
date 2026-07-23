@@ -11,12 +11,23 @@ import torch
 
 try:
     import numpy as np
-except Exception:  # optional dependency in minimal environments
+except ImportError:  # optional dependency in minimal environments
     np = None
 
 
 def seed_everything(seed: int = 42) -> None:
-    """Set reproducibility seeds across supported libraries."""
+    """
+    Seed supported random number generators for reproducibility.
+
+    This seeds Python, NumPy (if installed), and PyTorch. It also enables
+    deterministic cuDNN behavior by setting:
+
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+    Note:
+        Deterministic execution can reduce GPU performance.
+    """
     random.seed(seed)
     if np is not None:
         np.random.seed(seed)
@@ -29,18 +40,7 @@ def seed_everything(seed: int = 42) -> None:
     os.environ["PYTHONHASHSEED"] = str(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-
-
-def move_to_device(obj: Any, device):
-    """Recursively move tensors and collections to ``device``."""
-    if torch.is_tensor(obj):
-        return obj.to(device, non_blocking=True)
-    if isinstance(obj, dict):
-        return {k: move_to_device(v, device) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
-        return type(obj)(move_to_device(x, device) for x in obj)
-    return obj
-
+    torch.use_deterministic_algorithms(True, warn_only=True)
 
 def ensure_dir(path: str) -> str:
     """Create a directory if it does not exist and return the same path."""
@@ -61,7 +61,6 @@ def timestamp() -> str:
 
 
 # Distributed-safe helpers
-
 def get_rank() -> int:
     if not torch.distributed.is_available() or not torch.distributed.is_initialized():
         return 0

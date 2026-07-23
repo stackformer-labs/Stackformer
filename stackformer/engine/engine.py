@@ -10,7 +10,8 @@ import torch
 from stackformer.logging.metrics import MetricTracker
 from stackformer.amp import step_optimizer, update_scaler
 from stackformer.training.loops import eval_epoch, train_epoch
-from stackformer.utils.utils import is_main_process, move_to_device
+from stackformer.utils.utils import is_main_process
+from stackformer.utils.device import move_to_device
 
 
 class Engine:
