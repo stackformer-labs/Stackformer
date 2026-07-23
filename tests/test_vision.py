@@ -1,19 +1,21 @@
+import pytest
 import torch
+from tests._test_utils import _checkpoint
 
-# Adjust imports to your actual paths if needed
 from stackformer.vision.vit import ViT
 from stackformer.vision.segformer import (
-    patch,
-    Multi_Head_Attention,
-    transformer_block,
-    Encoder,
     SegFormerB0,
+    Encoder,
+    patch,
+    transformer_block,
+    Multi_Head_Attention as SegFormerMHA,
 )
 
 
-def test_vit_forward():
+def test_vit_forward(torch_device):
+    _checkpoint("test_vit_forward setup", device=torch_device)
     B = 2
-    img = torch.randn(B, 3, 32, 32)
+    img = torch.randn(B, 3, 32, 32, device=torch_device)
 
     model = ViT(
         img_size=32,
@@ -24,36 +26,48 @@ def test_vit_forward():
         hidden_dim=64,
         num_classes=10,
         dropout=0.0,
-    )
+    ).to(torch_device)
 
+    _checkpoint("Executing ViT forward pass")
     out = model(img)
+    _checkpoint("Asserting ViT output shape", out_shape=out.shape)
     assert out.shape == (B, 10)
+    assert torch.isfinite(out).all()
 
 
-def test_patch_embedding():
+def test_patch_embedding(torch_device):
+    _checkpoint("test_patch_embedding setup", device=torch_device)
     B = 2
-    img = torch.randn(B, 3, 32, 32)
+    img = torch.randn(B, 3, 32, 32, device=torch_device)
 
-    p = patch(img_size=32, in_channels=3, out_channels=16, kernel=4, stride=4, padding=0)
+    p = patch(img_size=32, in_channels=3, out_channels=16, kernel=4, stride=4, padding=0).to(torch_device)
+    _checkpoint("Executing patch embedding forward")
     out = p(img)
 
     # tokens = (32 / 4)^2 = 64
+    _checkpoint("Asserting patch output shape", out_shape=out.shape)
     assert out.shape == (B, 64, 16)
+    assert torch.isfinite(out).all()
 
 
-def test_segformer_attention():
+def test_segformer_attention(torch_device):
+    _checkpoint("test_segformer_attention setup (H-01 spatial reduction MHA)", device=torch_device)
     B, N, C = 2, 16, 32
-    x = torch.randn(B, N, C)
+    x = torch.randn(B, N, C, device=torch_device)
 
-    att = Multi_Head_Attention(embed_dim=C, num_heads=4, dropout=0.0)
+    att = SegFormerMHA(embed_dim=C, num_heads=4, dropout=0.0, device=torch_device)
+    _checkpoint("Executing SegFormer spatial reduction attention forward")
     out = att(x)
 
+    _checkpoint("Asserting SegFormer attention output shape", out_shape=out.shape)
     assert out.shape == x.shape
+    assert torch.isfinite(out).all()
 
 
-def test_transformer_block():
+def test_transformer_block(torch_device):
+    _checkpoint("test_transformer_block setup", device=torch_device)
     B, N, C = 2, 16, 32
-    x = torch.randn(B, N, C)
+    x = torch.randn(B, N, C, device=torch_device)
 
     block = transformer_block(
         embed_dim=C,
@@ -61,30 +75,59 @@ def test_transformer_block():
         hidden_dim=64,
         dropout=0.0,
         reduction=1,
-    )
+    ).to(torch_device)
 
+    _checkpoint("Executing SegFormer transformer block forward")
     out = block(x)
+    _checkpoint("Asserting block output shape", out_shape=out.shape)
     assert out.shape == x.shape
+    assert torch.isfinite(out).all()
 
 
-def test_segformer_encoder():
+def test_segformer_encoder(torch_device):
+    _checkpoint("test_segformer_encoder setup", device=torch_device)
     B = 2
-    img = torch.randn(B, 3, 64, 64)
+    img = torch.randn(B, 3, 64, 64, device=torch_device)
 
-    enc = Encoder()
+    enc = Encoder().to(torch_device)
+    _checkpoint("Executing SegFormer Encoder forward")
     f1, f2, f3, f4 = enc(img)
 
+    _checkpoint("Asserting multi-scale feature map dimensions")
     assert f1.ndim == 4
     assert f2.ndim == 4
     assert f3.ndim == 4
     assert f4.ndim == 4
 
 
-def test_segformer_full_forward():
+def test_segformer_full_forward(torch_device):
+    _checkpoint("test_segformer_full_forward setup", device=torch_device)
     B = 1
-    img = torch.randn(B, 3, 64, 64)
+    img = torch.randn(B, 3, 64, 64, device=torch_device)
 
-    model = SegFormerB0(num_classes=5)
+    model = SegFormerB0(num_classes=5).to(torch_device)
+    _checkpoint("Executing SegFormerB0 full forward")
     out = model(img)
 
+    _checkpoint("Asserting SegFormerB0 output shape", out_shape=out.shape)
     assert out.shape == (B, 5, 64, 64)
+    assert torch.isfinite(out).all()
+
+
+@pytest.mark.gpu
+def test_segformer_gpu_device_assertion_regression():
+    """Cover Critical C-01 issue: SegFormer device assertion crash on GPU.
+
+    When SegFormerB0 is created on CPU and moved to GPU via .to('cuda'),
+    local Multi_Head_Attention retains self.device = 'cpu', raising AssertionError.
+    """
+    _checkpoint("test_segformer_gpu_device_assertion_regression setup (C-01)")
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA unavailable for SegFormer GPU device assertion test")
+
+    model = SegFormerB0(num_classes=5).to("cuda")
+    img = torch.randn(1, 3, 64, 64, device="cuda")
+
+    _checkpoint("Testing SegFormer GPU forward after .to('cuda')")
+    out = model(img)
+    assert out.shape == (1, 5, 64, 64)

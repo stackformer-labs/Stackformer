@@ -1,6 +1,6 @@
 import pytest
 import torch
-
+from tests._test_utils import _checkpoint
 from stackformer.modules.Attention import kv_cache_group_query, kv_cache_multihead
 
 BATCH = 2
@@ -17,22 +17,23 @@ HEADS = 2
         1,
     ),
 ])
-def test_kv_cache_growth_per_step_and_no_overwrite(cache_cls, kwargs, kv_heads):
-    torch.manual_seed(0)
-    x = torch.randn(BATCH, SEQ, EMB)
-    cache = cache_cls(**kwargs)
+def test_kv_cache_growth_per_step_and_no_overwrite(cache_cls, kwargs, kv_heads, torch_device):
+    _checkpoint("test_kv_cache_growth_per_step_and_no_overwrite setup", cache_cls=cache_cls.__name__, device=torch_device)
+    x = torch.randn(BATCH, SEQ, EMB, device=torch_device)
+    cache = cache_cls(device=torch_device, **kwargs)
 
     first_written = []
     for step in range(SEQ):
         token = x[:, step : step + 1]
         out = cache(token, start_pos=step, rope=False)
+        _checkpoint("Step execution", step=step, out_shape=out.shape)
         assert out.shape == (BATCH, 1, EMB)
         assert torch.isfinite(out).all()
 
-        current = cache.cache_keys[:, : step + 1].detach().clone()
-        assert current.shape == (BATCH, step + 1, kv_heads, EMB // HEADS)
+        current = cache.cache_keys[:, :, : step + 1].detach().clone()
+        assert current.shape == (BATCH, kv_heads, step + 1, EMB // HEADS)
 
         if step == 0:
             first_written = current.clone()
         else:
-            assert torch.allclose(cache.cache_keys[:, :1], first_written)
+            assert torch.allclose(cache.cache_keys[:, :, :1], first_written)
