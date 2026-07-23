@@ -99,7 +99,7 @@ class Self_Attention(nn.Module):
         >>> x = torch.randn(4, 32, 64)
         >>> y = layer(x, mask=True)
     """
-    def __init__(self, embed_dim, dropout=0.0, mask_type=['causal'], qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, dropout=0.0, mask_type=None, qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         self.embed_dim = embed_dim
         self.device = device
@@ -191,7 +191,7 @@ class Multi_Head_Attention(nn.Module):
         >>> layer = Multi_Head_Attention(embed_dim=512, num_heads=8)
         >>> y = layer(torch.randn(2, 128, 512), mask=True)
     """
-    def __init__(self, embed_dim, num_heads, dropout=0.0, mask_type=['causal'],qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, num_heads, dropout=0.0, mask_type=None,qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
 
@@ -282,7 +282,7 @@ class Multi_Head_Attention_With_RoPE(nn.Module):
     Returns:
         torch.Tensor: ``(B, T, C)``.
     """
-    def __init__(self, embed_dim, num_heads, dropout=0.0, mask_type=['causal'], qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, num_heads, dropout=0.0, mask_type=None, qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
 
@@ -375,7 +375,7 @@ class Cross_MultiHead_Attention(nn.Module):
     Returns:
         torch.Tensor: ``(B, T, C)``.
     """
-    def __init__(self, embed_dim, num_heads, dropout=0.0, mask_type=['causal'], qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, num_heads, dropout=0.0, mask_type=None, qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
 
@@ -469,7 +469,7 @@ class Multi_query_Attention(nn.Module):
     Returns:
         torch.Tensor: ``(B, T, C)``.
     """
-    def __init__(self, embed_dim, num_heads, dropout=0.0, mask_type=['causal'], qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, num_heads, dropout=0.0, mask_type=None, qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
 
@@ -563,7 +563,7 @@ class Multi_query_Attention_With_RoPE(nn.Module):
     Returns:
         torch.Tensor: ``(B, T, C)``.
     """
-    def __init__(self, embed_dim, num_heads, dropout=0.0, mask_type=['causal'], qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, num_heads, dropout=0.0, mask_type=None, qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
 
@@ -674,7 +674,7 @@ class Group_query_Attention(nn.Module):
     Returns:
         torch.Tensor: ``(B, T, C)``.
     """
-    def __init__(self, embed_dim, num_query_heads, num_kv_heads, qkv_bias=False, dropout=0.0, mask_type=['causal'], device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, num_query_heads, num_kv_heads, qkv_bias=False, dropout=0.0, mask_type=None, device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         assert embed_dim % num_query_heads == 0, "embed_dim must be divisible by num_query_heads"
         assert num_query_heads % num_kv_heads == 0, "num_query_heads must be divisible by num_kv_heads"
@@ -766,7 +766,7 @@ class Group_query_Attention_With_RoPE(nn.Module):
     Returns:
         torch.Tensor: ``(B, T, C)``.
     """
-    def __init__(self, embed_dim, num_query_heads, num_kv_heads, qkv_bias=False, dropout=0.0, mask_type=['causal'], device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, num_query_heads, num_kv_heads, qkv_bias=False, dropout=0.0, mask_type=None, device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         assert embed_dim % num_query_heads == 0, "embed_dim must be divisible by num_query_heads"
         assert num_query_heads % num_kv_heads == 0, "num_query_heads must be divisible by num_kv_heads"
@@ -864,7 +864,7 @@ class kv_cache_multihead(nn.Module):
     Returns:
         torch.Tensor: ``(B, T, C)``.
     """
-    def __init__(self, embed_dim, num_heads, batch_size, kv_seq_len, mask_type=['causal'], qkv_bias=False, dropout=0.0, device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, num_heads, batch_size, kv_seq_len, mask_type=None, qkv_bias=False, dropout=0.0, device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
 
@@ -1007,7 +1007,7 @@ class kv_cache_group_query(nn.Module):
     Returns:
         torch.Tensor: ``(B, T, C)``.
     """
-    def __init__(self, embed_dim, num_query_heads, num_kv_heads, kv_seq_len, batch_size, mask_type=['causal'], qkv_bias=False, dropout=0.0, device='cpu', dtype=torch.float32, **mask_kwargs):
+    def __init__(self, embed_dim, num_query_heads, num_kv_heads, kv_seq_len, batch_size, mask_type=None, qkv_bias=False, dropout=0.0, device='cpu', dtype=torch.float32, **mask_kwargs):
         super().__init__()
         assert embed_dim % num_query_heads == 0, "embed_dim must be divisible by num_query_heads"
         assert num_query_heads % num_kv_heads == 0, "num_query_heads must be divisible by num_kv_heads"

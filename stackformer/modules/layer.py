@@ -125,7 +125,7 @@ class BlockConfig:
     pre_norm: bool  = True
 
     mask_type: list = field(default_factory=lambda: ["causal"])
-    qkv_bias:  bool = False
+    qkv_bias:  bool = True
 
     device: str            = "cpu"
     dtype:  torch.dtype    = torch.float32
@@ -161,25 +161,28 @@ def _build_attention(cfg: BlockConfig) -> nn.Module:
         dtype     = cfg.dtype,
     )
     E, H, G = cfg.embed_dim, cfg.num_heads, cfg.num_kv_heads
-
-    registry: dict[str, nn.Module] = {
-        "mha":      Multi_Head_Attention(E, H, **shared),
-        "mha_rope": Multi_Head_Attention_With_RoPE(E, H, **shared),
-        "mqa":      Multi_query_Attention(E, H, **shared),
-        "mqa_rope": Multi_query_Attention_With_RoPE(E, H, **shared),
-        "gqa":      Group_query_Attention(E, H, G, **shared),
-        "gqa_rope": Group_query_Attention_With_RoPE(E, H, G, **shared),
-        "self":     Self_Attention(E, **shared),
-    }
+    
     key = cfg.attention.lower()
-    if key not in registry:
+    if key == "self":
+        return Self_Attention(E, **shared)
+    elif key == "mha":
+        return Multi_Head_Attention(E, H, **shared)
+    elif key == "mha_rope":
+        return Multi_Head_Attention_With_RoPE(E, H, **shared)
+    elif key == "mqa":
+        return Multi_query_Attention(E, H, **shared)
+    elif key == "mqa_rope":
+        return Multi_query_Attention_With_RoPE(E, H, **shared)
+    elif key == "gqa":
+        return Group_query_Attention(E, H, G, **shared)
+    elif key == "gqa_rope":
+        return Group_query_Attention_With_RoPE(E, H, G, **shared)
+    else:
         raise ValueError(
             f"Unknown attention '{cfg.attention}'. "
-            f"Available: {list(registry)}"
+            f"Available: ['mha', 'mha_rope', 'mqa', 'mqa_rope', 'gqa', 'gqa_rope', 'self']"
         )
-    return registry[key]
-
-
+        
 def _build_cross_attention(cfg: BlockConfig) -> nn.Module:
     """Return a cross-attention module (queries from target, K/V from memory)."""
     return Cross_MultiHead_Attention(
@@ -195,41 +198,42 @@ def _build_ffn(cfg: BlockConfig) -> nn.Module:
     """Return the FFN module described by *cfg*."""
     hw = dict(device=cfg.device, dtype=cfg.dtype)
     E, M, D = cfg.embed_dim, cfg.hidden_dim, cfg.dropout
-
-    registry: dict[str, nn.Module] = {
-        "relu":      FF_ReLU(E, M, D, **hw),
-        "leakyrelu": FF_LeakyReLU(E, M, D, **hw),
-        "gelu":      FF_GELU(E, M, D, **hw),
-        "sigmoid":   FF_Sigmoid(E, M, D, **hw),
-        "silu":      FF_SiLU(E, M, D, **hw),
-        "swiglu":    FF_SwiGLU(E, M, D, **hw),
-        "geglu":     FF_GeGLU(E, M, D, **hw),
-    }
+    
     key = cfg.ffn.lower()
-    if key not in registry:
+    if key == "relu":
+        return FF_ReLU(E, M, D, **hw)
+    elif key == "leakyrelu":
+        return FF_LeakyReLU(E, M, D, **hw)
+    elif key == "gelu":
+        return FF_GELU(E, M, D, **hw)
+    elif key == "sigmoid":
+        return FF_Sigmoid(E, M, D, **hw)
+    elif key == "silu":
+        return FF_SiLU(E, M, D, **hw)
+    elif key == "swiglu":
+        return FF_SwiGLU(E, M, D, **hw)
+    elif key == "geglu":
+        return FF_GeGLU(E, M, D, **hw)
+    else:
         raise ValueError(
             f"Unknown FFN '{cfg.ffn}'. "
-            f"Available: {list(registry)}"
+            f"Available: ['relu', 'leakyrelu', 'gelu', 'sigmoid', 'silu', 'swiglu', 'geglu']"
         )
-    return registry[key]
-
 
 def _build_norm(cfg: BlockConfig) -> nn.Module:
     """Return one normalization layer described by *cfg*."""
     hw = dict(device=cfg.device, dtype=cfg.dtype)
 
-    registry: dict[str, nn.Module] = {
-        "layernorm": LayerNormalization(cfg.embed_dim, **hw),
-        "rmsnorm":   RMSNormalization(cfg.embed_dim, **hw),
-    }
     key = cfg.norm.lower()
-    if key not in registry:
+    if key == "layernorm":
+        return LayerNormalization(cfg.embed_dim, **hw)
+    elif key == "rmsnorm":
+        return RMSNormalization(cfg.embed_dim, **hw)
+    else:
         raise ValueError(
             f"Unknown norm '{cfg.norm}'. "
-            f"Available: {list(registry)}"
+            f"Available: ['layernorm', 'rmsnorm']"
         )
-    return registry[key]
-
 
 def _build_pos_embedding(
     name: str | None,
