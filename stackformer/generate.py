@@ -123,8 +123,21 @@ def text_generate(
 
     cache = None
 
-    # Explicit cache capability
-    use_cache = getattr(model, "supports_kv_cache", False)
+    has_cache_methods = (
+        callable(getattr(model, "prefill", None))
+        and callable(getattr(model, "decode", None))
+    )
+    explicit_flag = getattr(model, "supports_kv_cache", None)
+
+    if explicit_flag is True and not has_cache_methods:
+        raise RuntimeError(
+            "supports_kv_cache=True requires both "
+            "'prefill()' and 'decode()' methods."
+        )
+
+    # Use the cache path whenever the model implements it, unless the model
+    # explicitly opts out via supports_kv_cache = False.
+    use_cache = has_cache_methods and explicit_flag is not False
 
     if use_cache:
         if not (

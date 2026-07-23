@@ -37,7 +37,7 @@ def test_module_interoperability_embedding_pos_attention_ff_pipeline():
     batch, seq, vocab_size, embed_dim = 2, 6, 32, 8
     token_embedding = torch.nn.Embedding(vocab_size, embed_dim)
     pos_embedding = SinusoidalPositionalEmbedding(seq_len=seq, embed_dim=embed_dim)
-    attention = Multi_Head_Attention(embed_dim=embed_dim, num_heads=2, mask_type=["full"], dropout=0.0)
+    attention = Multi_Head_Attention(embed_dim=embed_dim, num_heads=2, mask_type=["no"], dropout=0.0)
     ff = FF_ReLU(embed_dim=embed_dim, hidden_dim=16, dropout=0.0)
 
     ids = torch.randint(0, vocab_size, (batch, seq))

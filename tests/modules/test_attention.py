@@ -20,7 +20,7 @@ MASKS = [
     dict(mask_type=["causal"]),
     dict(mask_type=["sliding_window"], window_size=2),
     dict(mask_type=["sliding_window", "global_mask"], window_size=2, global_index=[1]),
-    dict(mask_type=["full"]),
+    dict(mask_type=["no"]),
 ]
 
 
