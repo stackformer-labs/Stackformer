@@ -50,11 +50,7 @@ from stackformer.modules.position_embedding import (
     SinusoidalPositionalEmbedding,
 )
 
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Config
-# ─────────────────────────────────────────────────────────────────────────────
-
 @dataclass
 class BlockConfig:
     """All hyperparameters that describe one transformer block.
@@ -154,10 +150,7 @@ class BlockConfig:
             )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Private factories  (one concern each — easy to extend)
-# ─────────────────────────────────────────────────────────────────────────────
-
 def _build_attention(cfg: BlockConfig) -> nn.Module:
     """Return the self-attention module described by *cfg*."""
     shared = dict(
@@ -240,8 +233,8 @@ def _build_norm(cfg: BlockConfig) -> nn.Module:
 
 def _build_pos_embedding(
     name: str | None,
-    cfg: BlockConfig,
     max_seq_len: int,
+    cfg: BlockConfig,
 ) -> nn.Module | None:
     """Return a positional embedding module, or None.
 
@@ -267,10 +260,7 @@ def _build_pos_embedding(
     return registry[key]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Blocks
-# ─────────────────────────────────────────────────────────────────────────────
-
 class EncoderBlock(nn.Module):
     """One transformer encoder layer: self-attention + FFN.
 
@@ -389,11 +379,7 @@ class DecoderBlock(nn.Module):
             x = self.norm3(x + self.ffn(x))
         return x
 
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Stacks
-# ─────────────────────────────────────────────────────────────────────────────
-
 class TransformerEncoder(nn.Module):
     """A stack of :class:`EncoderBlock` layers.
 
@@ -500,11 +486,7 @@ class TransformerDecoder(nn.Module):
             )
         return self.final_norm(x)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Backward-compatible TransformerBlock
-# ─────────────────────────────────────────────────────────────────────────────
-
 class TransformerBlock(nn.Module):
     """Single encoder block — kept for backward compatibility.
 
