@@ -41,17 +41,21 @@ class AbsolutePositionEmbedding(nn.Module):
         torch.Size([4, 32, 128])
     
     """
-    def __init__(self, seq_len, embed_dim, device='cpu', dtype=torch.float32):
+    def __init__(self, seq_len, embed_dim, device=None, dtype=None):
         super().__init__()
         self.seq_len = seq_len
         self.embed_dim = embed_dim
-        self.device = device
-        self.embedding = nn.Embedding(seq_len, embed_dim, device=device, dtype=dtype)
+        factory_kwargs = {"device": device, "dtype": dtype}
+        self.embedding = nn.Embedding(seq_len, embed_dim, **factory_kwargs)
 
     def forward(self, x):
         batch_size, seq_len = x.shape[0], x.shape[1]
         # Derive device from the embedding weight so this works correctly after
         # .to(device) without relying on the stale self.device string.
+        if seq_len > self.seq_len:
+            raise ValueError(
+                f"Sequence length {seq_len} exceeds maximum {self.seq_len}."
+            )
         positions = torch.arange(seq_len, device=self.embedding.weight.device, dtype=torch.long)
         abs_pos = self.embedding(positions)  # (seq_len, embed_dim)
         out = abs_pos.unsqueeze(0).expand(batch_size, seq_len, -1)  # (batch, seq_len, embed_dim)
@@ -88,28 +92,32 @@ class SinusoidalPositionalEmbedding(nn.Module):
         torch.Size([4, 32, 128])
     
     """
-    def __init__(self, seq_len, embed_dim, device='cpu', dtype=torch.float32):
+    def __init__(self, seq_len, embed_dim, device=None, dtype=None):
         super().__init__()
-        self.seq_len = seq_len
-        self.embed_dim = embed_dim
-        self.device=device
-        self.dtype = dtype
 
-        position = torch.arange(0, seq_len).unsqueeze(1)  # (T, 1)
-        div_term = torch.exp(torch.arange(0, embed_dim, 2) * -(math.log(10000.0) / embed_dim))  # (D/2)
+        if embed_dim % 2 != 0:
+            raise ValueError(
+                f"embed_dim must be even, got {embed_dim}"
+            )
 
-        pe = torch.zeros(seq_len, embed_dim)
-        pe[:, 0::2] = torch.sin(position * div_term)  # even dims
-        pe[:, 1::2] = torch.cos(position * div_term)  # odd dims
+        factory_kwargs = {"device": device, "dtype": dtype}
 
-        self.register_buffer("pe", pe.to(device=self.device, dtype=self.dtype))
+        position = torch.arange(seq_len, **factory_kwargs).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, embed_dim, 2, **factory_kwargs)* -(math.log(10000.0) / embed_dim))
+
+        pe = torch.zeros(seq_len, embed_dim, **factory_kwargs)
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+
+        self.register_buffer("pe", pe, persistent=False)
 
     def forward(self, x):
-        batch_size, seq_len = x.shape[0], x.shape[1]
-        # self.pe is a registered buffer, so it already lives on the correct
-        # device after .to(device). Do NOT use self.device (constructor string).
-        out = self.pe[:seq_len].unsqueeze(0).expand(batch_size, seq_len, -1)
-        return out.to(dtype=self.dtype)
+        B, T = x.shape[:2]
+        if T > self.pe.size(0):
+            raise ValueError(
+                f"Sequence length {T} exceeds maximum {self.pe.size(0)}."
+            )
+        return self.pe[:T].unsqueeze(0).expand(B, T, -1)
 
 class RoPE(nn.Module):
     """Rotary positional embedding for attention query/key tensors.
@@ -141,43 +149,48 @@ class RoPE(nn.Module):
         >>> q_rot.shape
         torch.Size([2, 8, 32, 64])
     """
-    def __init__(self, head_dim: int, seq_len: int, theta: float = 10000.0, device="cpu", dtype=torch.float32):
+    def __init__(self, head_dim: int, seq_len: int, device=None, dtype=None, theta: float = 10000.0):
         super().__init__()
         self.head_dim = head_dim
         self.seq_len = seq_len
         self.theta = theta
-        self.device = device
-        self.dtype = dtype
+        self.factory_kwargs = {"device": device, "dtype": dtype}
 
         # Precompute and register buffer
         freq_complex = self._precompute_theta_position_frequency(head_dim, seq_len, theta)
         self.register_buffer("freq_complex", freq_complex, persistent=True)
 
     def _precompute_theta_position_frequency(self, head_dim: int, seq_len: int, theta: float):
-        assert head_dim % 2 == 0, "head_dim must be even for RoPE"
+        if head_dim % 2 != 0:
+            raise ValueError("head_dim must be even for RoPE")
         dim_half = head_dim // 2
-        inv_freq = 1.0 / (theta ** (torch.arange(0, dim_half, device=self.device) / dim_half))
-        pos = torch.arange(seq_len, device=self.device)
+        inv_freq = 1.0 / (theta ** (torch.arange(0, dim_half, **self.factory_kwargs) / dim_half))
+        pos = torch.arange(seq_len, **self.factory_kwargs)
         freqs = torch.outer(pos, inv_freq)  # (seq_len, dim_half)
         freq_complex = torch.polar(torch.ones_like(freqs), freqs)
         return freq_complex  # (seq_len, dim_half)
 
     def forward(self, x: torch.Tensor):
         B, H, T, D = x.shape
-        assert D % 2 == 0, "head_dim must be even for RoPE"
+        if D % 2 != 0:
+            raise ValueError("head_dim must be even for RoPE")
 
         # reshape to complex
-        x_r = x.view(B, H, T, D // 2, 2)
+        x_r = x.reshape(B, H, T, D // 2, 2)
         x_complex = torch.view_as_complex(x_r.float())  # (B, H, T, D//2); promote for complex ops
 
         # slice correct freqs — freq_complex is a registered buffer, already on
         # the correct device after .to(device). Cast to match x_complex.
+        if T > self.freq_complex.size(0):
+            raise ValueError(
+                f"Sequence length {T} exceeds maximum {self.freq_complex.size(0)}."
+            )
         freqs = self.freq_complex[:T].unsqueeze(0).unsqueeze(0)  # (1,1,T,D//2)
-        freqs = freqs.to(device=x.device)
+        freqs = freqs.to(x_complex)
 
         # apply rotation
         x_rot = x_complex * freqs  # (B, H, T, D//2)
 
         # back to real, cast back to original dtype
-        x_out = torch.view_as_real(x_rot).view(B, H, T, D)
-        return x_out.to(dtype=x.dtype)
+        x_out = torch.view_as_real(x_rot).reshape(B, H, T, D)
+        return x_out

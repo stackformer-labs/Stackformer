@@ -106,10 +106,7 @@ class Self_Attention(nn.Module):
         self.dtype = dtype
         self.mask_type = mask_type
         self.mask_kwargs = mask_kwargs
-
-        # Scaling factor for dot-product attention
-        self.scale = 1.0 / math.sqrt(embed_dim)
-
+        
         # Linear layer
         self.q_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
         self.k_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
@@ -199,7 +196,6 @@ class Multi_Head_Attention(nn.Module):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads  # Each head gets a slice of the embedding
-        self.scale = 1.0 / math.sqrt(self.head_dim)
         self.mask_type = mask_type
         self.device = device
         self.dtype = dtype
@@ -292,7 +288,6 @@ class Multi_Head_Attention_With_RoPE(nn.Module):
         self.num_heads = num_heads
         self.mask_type = mask_type
         self.head_dim = embed_dim // num_heads  # Each head gets a slice of the embedding
-        self.scale = 1.0 / math.sqrt(self.head_dim)
         self.device = device
         self.dtype = dtype
         self.mask_kwargs = mask_kwargs
@@ -385,7 +380,6 @@ class Cross_MultiHead_Attention(nn.Module):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
-        self.scale = 1.0 / math.sqrt(self.head_dim)
         self.mask_type = mask_type
         self.device = device
         self.dtype = dtype
@@ -480,7 +474,6 @@ class Multi_query_Attention(nn.Module):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
-        self.scale = 1.0 / math.sqrt(self.head_dim)
         self.mask_type = mask_type
         self.device = device
         self.dtype = dtype
@@ -519,8 +512,7 @@ class Multi_query_Attention(nn.Module):
         v = self.v_proj(x)                    # (B, T, D)
 
         # Multi-head queries
-        q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
-
+        q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2) # (B, H, T, D)
         # Shared K/V
         k = k.unsqueeze(1)                    # (B, 1, T, D)
         v = v.unsqueeze(1)                    # (B, 1, T, D)
@@ -575,7 +567,6 @@ class Multi_query_Attention_With_RoPE(nn.Module):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
-        self.scale = 1.0 / math.sqrt(self.head_dim)
         self.mask_type = mask_type
         self.device = device
         self.dtype = dtype
@@ -692,7 +683,6 @@ class Group_query_Attention(nn.Module):
         self.num_kv_heads = num_kv_heads
         self.head_dim = embed_dim // num_query_heads
         self.num_queries_per_kv = num_query_heads // num_kv_heads
-        self.scale = 1.0 / math.sqrt(self.head_dim)
         self.mask_type = mask_type
         self.mask_kwargs = mask_kwargs
 
@@ -785,7 +775,6 @@ class Group_query_Attention_With_RoPE(nn.Module):
         self.num_kv_heads = num_kv_heads
         self.head_dim = embed_dim // num_query_heads
         self.num_queries_per_kv = num_query_heads // num_kv_heads
-        self.scale = 1.0 / math.sqrt(self.head_dim)
         self.mask_type = mask_type
         self.mask_kwargs = mask_kwargs
 
@@ -880,7 +869,6 @@ class kv_cache_multihead(nn.Module):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
-        self.scale = 1.0 / math.sqrt(self.head_dim)
         self.device = device
         self.dtype = dtype
         self.mask_type = mask_type
@@ -1027,7 +1015,6 @@ class kv_cache_group_query(nn.Module):
         self.num_kv_heads = num_kv_heads
         self.head_dim = embed_dim // num_query_heads
         self.num_queries_per_kv = num_query_heads // num_kv_heads
-        self.scale = 1.0 / math.sqrt(self.head_dim)
         self.kv_seq_len = kv_seq_len
         self.device = device
         self.dtype = dtype

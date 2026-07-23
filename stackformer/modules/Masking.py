@@ -18,10 +18,10 @@ a registry-based factory pattern with configurable composition operators.
 
 from typing import Callable, Dict, List, Literal
 import torch
-
+import inspect
 
 # Base Mask Functions
-def causal(seq_len: int) -> torch.Tensor:
+def causal(seq_len: int, device=None) -> torch.Tensor:
     """
     Standard autoregressive causal mask.
 
@@ -37,11 +37,11 @@ def causal(seq_len: int) -> torch.Tensor:
             False = masked  (upper triangle, future tokens)
     """
     return torch.tril(
-        torch.ones(seq_len, seq_len, dtype=torch.bool)
+        torch.ones(seq_len, seq_len, dtype=torch.bool, device=device)
     )
 
 
-def sliding_window(seq_len: int, window_size: int) -> torch.Tensor:
+def sliding_window(seq_len: int, window_size: int, device=None) -> torch.Tensor:
     """
     Sliding window causal attention.
 
@@ -58,15 +58,19 @@ def sliding_window(seq_len: int, window_size: int) -> torch.Tensor:
             True  = visible
             False = masked
     """
-    i = torch.arange(seq_len).unsqueeze(1)   # (seq_len, 1) — query index
-    j = torch.arange(seq_len).unsqueeze(0)   # (1, seq_len) — key index
+    if window_size <= 0:
+        raise ValueError("window_size must be > 0")
+    
+    i = torch.arange(seq_len, device=device).unsqueeze(1)   # (seq_len, 1) — query index
+    j = torch.arange(seq_len, device=device).unsqueeze(0)   # (1, seq_len) — key index
 
     in_past   = j <= i                        # key is not a future token
     in_window = (i - j) < window_size         # key is within the window
+    
     return in_past & in_window
 
 
-def dilated_causal(seq_len: int, dilation: int) -> torch.Tensor:
+def dilated_causal(seq_len: int, dilation: int, device=None) -> torch.Tensor:
     """
     Dilated causal attention.
 
@@ -83,15 +87,18 @@ def dilated_causal(seq_len: int, dilation: int) -> torch.Tensor:
             True  = visible
             False = masked
     """
-    i = torch.arange(seq_len).unsqueeze(1)
-    j = torch.arange(seq_len).unsqueeze(0)
+    if dilation <= 0:
+        raise ValueError("dilation must be > 0")
+ 
+    i = torch.arange(seq_len, device=device).unsqueeze(1)
+    j = torch.arange(seq_len, device=device).unsqueeze(0)
 
     in_past   = j <= i
     on_stride = (i - j) % dilation == 0
     return in_past & on_stride
 
 
-def random_mask(seq_len: int, num_random: int) -> torch.Tensor:
+def random_mask(seq_len: int, num_random: int, device=None) -> torch.Tensor:
     """
     Random sparse causal attention.
 
@@ -107,21 +114,22 @@ def random_mask(seq_len: int, num_random: int) -> torch.Tensor:
             True  = visible
             False = masked
     """
+    if num_random < 0 or num_random > seq_len:
+        raise ValueError("num_random must be between 0 and seq_len")
     # Start fully masked; selectively open chosen past positions.
-    rows = torch.arange(seq_len).repeat_interleave(num_random)
     cols = (
-        torch.rand(seq_len, seq_len)
+        torch.rand(seq_len, seq_len, device=device)
         .tril()
         .topk(num_random, dim=1)
         .indices
     )
 
-    mask = torch.zeros(seq_len, seq_len, dtype=torch.bool)
+    mask = torch.zeros(seq_len, seq_len, dtype=torch.bool, device=device)
     mask.scatter_(1, cols, True)
     return mask
 
 
-def global_mask(seq_len: int, global_index: List[int]) -> torch.Tensor:
+def global_mask(seq_len: int, global_index: List[int], device=None) -> torch.Tensor:
     """
     Global attention mask.
 
@@ -138,9 +146,11 @@ def global_mask(seq_len: int, global_index: List[int]) -> torch.Tensor:
             True  = visible
             False = masked
     """
+    if any(i < 0 or i >= seq_len for i in global_index):
+        raise ValueError("global_index contains invalid token indices")
     # Start fully masked; open global rows and columns.
-    mask = torch.zeros(seq_len, seq_len, dtype=torch.bool)
-    g    = torch.tensor(global_index)
+    mask = torch.zeros(seq_len, seq_len, dtype=torch.bool, device=device)
+    g    = torch.tensor(global_index, device=device)
 
     mask[g, :] = True   # global tokens → can attend to everyone
     mask[:, g] = True   # everyone      → can attend to global tokens
@@ -148,7 +158,7 @@ def global_mask(seq_len: int, global_index: List[int]) -> torch.Tensor:
     return mask
 
 
-def no_mask(seq_len: int) -> torch.Tensor:
+def no_mask(seq_len: int, device=None) -> torch.Tensor:
     """
     Full bidirectional attention — every position is visible.
 
@@ -158,10 +168,10 @@ def no_mask(seq_len: int) -> torch.Tensor:
     Returns:
         torch.Tensor: (seq_len, seq_len) boolean mask, all True.
     """
-    return torch.ones(seq_len, seq_len, dtype=torch.bool)
+    return torch.ones(seq_len, seq_len, dtype=torch.bool, device=device)
 
 
-def mistral(seq_len: int, window_size: int, dilation: int) -> torch.Tensor:
+def mistral(seq_len: int, window_size: int, dilation: int, device=None) -> torch.Tensor:
     """
     Mistral-style hybrid mask: sliding window + dilated attention.
 
@@ -178,13 +188,13 @@ def mistral(seq_len: int, window_size: int, dilation: int) -> torch.Tensor:
             True  = visible
             False = masked
     """
-    return sliding_window(seq_len, window_size) | dilated_causal(seq_len, dilation)
+    return (sliding_window(seq_len, window_size, device=device)| dilated_causal(seq_len, dilation, device=device))
 
 # Registry
 MASK_REGISTRY: Dict[str, Callable] = {
+    "no":             no_mask,
     "causal":         causal,
     "sliding_window": sliding_window,
-    "no":             no_mask,
     "dilated_causal": dilated_causal,
     "random_mask":    random_mask,
     "global_mask":    global_mask,
@@ -289,15 +299,16 @@ def make_mask(
                 f"Unknown mask '{name}'. "
                 f"Available: {list(MASK_REGISTRY.keys())}"
             )
+            
+        fn  = MASK_REGISTRY[name]
+        sig = inspect.signature(fn)
+        call_kwargs = {
+            k: v
+            for k, v in kwargs.items()
+            if k in sig.parameters
+        }
 
-        fn          = MASK_REGISTRY[name]
-        fn_args     = fn.__code__.co_varnames[: fn.__code__.co_argcount]
-        call_kwargs = {k: v for k, v in kwargs.items() if k in fn_args}
-
-        partial = fn(seq_len, **call_kwargs)
-
-        if device is not None:
-            partial = partial.to(device)
+        partial = fn(seq_len, device=device, **call_kwargs)
 
         if combine == "or":
             mask |= partial

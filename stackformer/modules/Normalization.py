@@ -45,13 +45,12 @@ class LayerNormalization(nn.Module):
         torch.Size([4, 32, 256])
     
     """
-    def __init__(self, embed_dim, eps=1e-5, device='cpu', dtype=torch.float32):
+    def __init__(self, embed_dim, device=None, dtype=None, eps=1e-5):
         super().__init__()
         self.eps = eps
-        self.device = device
-        self.dtype = dtype
-        self.weight = nn.Parameter(torch.ones(embed_dim,device=self.device,dtype=self.dtype))  # gamma
-        self.bias = nn.Parameter(torch.zeros(embed_dim,device=self.device,dtype=self.dtype))   # beta
+        factory_kwargs = {"device": device, "dtype": dtype}
+        self.weight = nn.Parameter(torch.ones(embed_dim, **factory_kwargs))   # gamma
+        self.bias = nn.Parameter(torch.zeros(embed_dim, **factory_kwargs))   # beta
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         mean = x.mean(dim=-1, keepdim=True)
@@ -89,12 +88,11 @@ class RMSNormalization(nn.Module):
         torch.Size([4, 32, 256])
     
     """
-    def __init__(self, embed_dim, eps=1e-5, device='cpu', dtype=torch.float32):
+    def __init__(self, embed_dim, device=None, dtype=None, eps=1e-5):
         super().__init__()
         self.eps = eps
-        self.device = device
-        self.dtype = dtype
-        self.weight = nn.Parameter(torch.ones(embed_dim, device=self.device,dtype=self.dtype))  # gamma
+        factory_kwargs = {"device": device, "dtype": dtype}
+        self.weight = nn.Parameter(torch.ones(embed_dim, **factory_kwargs))  # gamma
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         rms = (x.pow(2).mean(-1, keepdim=True) + self.eps).sqrt()
