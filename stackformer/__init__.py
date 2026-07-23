@@ -2,7 +2,7 @@
 
 from .generate import text_generate
 from .config import GenerationConfig, ModelConfig, TrainingConfig
-from .models import GPT_1, GPT_2, gemma_1_2b, gemma_1_7b, llama_1, llama_2, transformer
+from .models import GPT_1, GPT_2, gemma_1_2b, gemma_1_7b, llama_1, llama_2, Transformer
 from .modules import (
     AbsolutePositionEmbedding,
     Cross_MultiHead_Attention,
@@ -75,7 +75,7 @@ __all__ = [
     "llama_2",
     "make_mask",
     "text_generate",
-    "transformer",
+    "Transformer",
     "GenerationConfig",
     "ModelConfig",
     "TrainingConfig",

@@ -40,8 +40,6 @@ class Multi_Head_Attention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
         self.scale = 1.0 / math.sqrt(self.head_dim)
-        self.device = device
-        self.dtype = dtype
         self.reduction = reduction
 
         # Linear projections for Q, K, V
@@ -61,7 +59,11 @@ class Multi_Head_Attention(nn.Module):
 
     def forward(self, x):
         B, N, C = x.shape
-        assert x.device == self.device and x.dtype == self.dtype, "Input tensor must match the specified device and dtype"
+        # NOTE: previously asserted x.device/x.dtype against self.device/self.dtype
+        # captured at __init__ time. That breaks whenever the parent model is moved
+        # with .to(device) after construction, since these plain attributes are not
+        # updated by nn.Module.to(). Rely on the actual submodule parameters/input
+        # tensor instead, which PyTorch keeps in sync automatically.
         
         q = self.q_proj(x)  # (B, N, C)
         

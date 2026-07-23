@@ -6,6 +6,7 @@ from contextlib import nullcontext
 from typing import Any, Callable, Optional, Tuple
 
 import torch
+import torch.nn.functional as F
 
 from stackformer.logging.metrics import MetricTracker
 from stackformer.amp import step_optimizer, update_scaler
@@ -210,12 +211,34 @@ class Engine:
             return outputs.loss
 
         if isinstance(outputs, (list, tuple)) and outputs:
-            if torch.is_tensor(outputs[0]) and outputs[0].ndim == 0:
-                return outputs[0]
+            # A model may compute and return its own loss as the first tuple
+            # element (common when losses are gathered/accumulated and come
+            # back as a single-element tensor rather than a strict 0-dim
+            # scalar, e.g. `loss.view(1)`). Accept any single-element tensor
+            # here, not just `ndim == 0`, so we don't misidentify it as
+            # logits and demand a criterion that isn't needed.
+            if torch.is_tensor(outputs[0]) and outputs[0].numel() == 1:
+                return outputs[0].squeeze()
             outputs = outputs[0]
 
         criterion = self.state.config.get("criterion")
         if criterion is None:
+            # No explicit criterion configured: fall back to a sensible
+            # default based on output/target shape and dtype, rather than
+            # forcing every caller to wire up a criterion for the common
+            # cases. Classification: integer class-index targets paired
+            # with one extra output dim (logits) -> cross-entropy.
+            # Regression: matching shapes -> MSE.
+            if torch.is_tensor(outputs) and torch.is_tensor(targets):
+                if (
+                    targets.dtype in (torch.int64, torch.long)
+                    and outputs.dim() == targets.dim() + 1
+                    and outputs.shape[0] == targets.shape[0]
+                ):
+                    return F.cross_entropy(outputs.view(-1, outputs.size(-1)), targets.view(-1))
+                if outputs.shape == targets.shape:
+                    return F.mse_loss(outputs, targets)
+
             raise ValueError("No criterion found. Pass criterion to Trainer or compute_loss_fn to Engine.")
 
         try:

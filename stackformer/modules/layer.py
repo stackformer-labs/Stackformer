@@ -81,6 +81,8 @@ class BlockConfig:
         mask_type:    List of mask pattern names forwarded to each attention
                       module (e.g. ``['causal']``, ``['sliding_window']``).
         qkv_bias:     Whether Q/K/V projection layers have bias terms.
+        eps:          Numerical stability epsilon forwarded to the
+                      normalization layer (LayerNorm / RMSNorm).
         device:       Compute and parameter device.
         dtype:        Parameter dtype.
 
@@ -101,6 +103,9 @@ class BlockConfig:
 
         # Small debug config
         cfg = BlockConfig(embed_dim=64, num_heads=4, hidden_dim=128, dropout=0.1)
+
+        # Custom norm epsilon (e.g. matching the original 2017 paper)
+        cfg = BlockConfig(embed_dim=512, num_heads=8, norm="layernorm", eps=1e-5)
     """
 
     embed_dim:    int
@@ -126,6 +131,8 @@ class BlockConfig:
 
     mask_type: list = field(default_factory=lambda: ["causal"])
     qkv_bias:  bool = True
+
+    eps: float = 1e-5
 
     device: str            = "cpu"
     dtype:  torch.dtype    = torch.float32
@@ -226,9 +233,9 @@ def _build_norm(cfg: BlockConfig) -> nn.Module:
 
     key = cfg.norm.lower()
     if key == "layernorm":
-        return LayerNormalization(cfg.embed_dim, **hw)
+        return LayerNormalization(cfg.embed_dim, eps=cfg.eps, **hw)
     elif key == "rmsnorm":
-        return RMSNormalization(cfg.embed_dim, **hw)
+        return RMSNormalization(cfg.embed_dim, eps=cfg.eps, **hw)
     else:
         raise ValueError(
             f"Unknown norm '{cfg.norm}'. "
@@ -419,7 +426,7 @@ class TransformerEncoder(nn.Module):
         max_seq_len:   int        = 4096,
     ) -> None:
         super().__init__()
-        self.pos_embedding = _build_pos_embedding(pos_embedding, cfg, max_seq_len)
+        self.pos_embedding = _build_pos_embedding(pos_embedding, max_seq_len, cfg)
         self.layers        = nn.ModuleList([EncoderBlock(cfg) for _ in range(num_layers)])
         # Pre-LN models need a final norm; post-LN already has one in each block.
         self.final_norm    = _build_norm(cfg) if cfg.pre_norm else nn.Identity()
@@ -467,7 +474,7 @@ class TransformerDecoder(nn.Module):
         max_seq_len:   int        = 4096,
     ) -> None:
         super().__init__()
-        self.pos_embedding = _build_pos_embedding(pos_embedding, cfg, max_seq_len)
+        self.pos_embedding = _build_pos_embedding(pos_embedding, max_seq_len, cfg)
         self.layers        = nn.ModuleList([DecoderBlock(cfg) for _ in range(num_layers)])
         self.final_norm    = _build_norm(cfg) if cfg.pre_norm else nn.Identity()
 
@@ -521,6 +528,7 @@ class TransformerBlock(nn.Module):
         norm:         str          = "layernorm",
         dropout:      float        = 0.0,
         pre_norm:     bool         = True,
+        eps:          float        = 1e-5,
         device:       str          = "cpu",
         dtype:        torch.dtype  = torch.float32,
     ) -> None:
@@ -535,6 +543,7 @@ class TransformerBlock(nn.Module):
             norm         = norm,
             dropout      = dropout,
             pre_norm     = pre_norm,
+            eps          = eps,
             device       = device,
             dtype        = dtype,
         )

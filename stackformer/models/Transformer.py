@@ -13,13 +13,14 @@ Is All You Need" baseline:
 Paper: https://arxiv.org/abs/1706.03762
 """
 
+import math
 import torch
 import torch.nn as nn
 
 from stackformer.modules.layer import BlockConfig, TransformerEncoder, TransformerDecoder
 
 
-class transformer(nn.Module):
+class Transformer(nn.Module):
     """Vaswani et al. style encoder-decoder Transformer.
 
     Simple explanation:
@@ -78,6 +79,8 @@ class transformer(nn.Module):
         super().__init__()
         assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
 
+        self.embed_scale = math.sqrt(embed_dim)
+
         cfg = BlockConfig(
             embed_dim  = embed_dim,
             num_heads  = num_heads,
@@ -86,6 +89,7 @@ class transformer(nn.Module):
             ffn        = "relu",
             norm       = "layernorm",
             pre_norm   = False,   # ← Post-LN: original 2017 paper
+            eps        = eps,
             dropout    = dropout,
             device     = device,
             dtype      = dtype,
@@ -111,13 +115,15 @@ class transformer(nn.Module):
 
         self.out_proj = nn.Linear(embed_dim, vocab_size, device=device, dtype=dtype)
 
-    def encode(self, src: torch.Tensor) -> torch.Tensor:
+    def encode(self, src):
         """Encode source tokens → memory  (B, S, C)."""
-        return self.encoder_stack(self.token_emb(src), mask=False)
+        x = self.token_emb(src) * self.embed_scale
+        return self.encoder_stack(x, mask=False)
 
-    def decode(self, tgt: torch.Tensor, memory: torch.Tensor) -> torch.Tensor:
+    def decode(self, tgt, memory):
         """Decode target tokens given encoder memory  (B, T, C)."""
-        return self.decoder_stack(self.token_emb(tgt), memory)
+        x = self.token_emb(tgt) * self.embed_scale
+        return self.decoder_stack(x, memory)
 
     def forward(self, source: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         memory = self.encode(source)              # (B, S, C)
