@@ -15,6 +15,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from stackformer.utils import _run_sdpa
 from stackformer.modules.Feed_forward import FF_GELU
 
 
@@ -125,7 +126,6 @@ class SpatialReductionAttention(nn.Module):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
-        self.scale = 1.0 / math.sqrt(self.head_dim)
         self.reduction = reduction
 
         self.q_proj = nn.Linear(embed_dim, embed_dim, bias=True, device=device, dtype=dtype)
@@ -140,7 +140,7 @@ class SpatialReductionAttention(nn.Module):
             self.kv_down = nn.Identity()
 
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=True, device=device, dtype=dtype)
-        self.dropout = nn.Dropout(dropout)
+        self.dropout_p = dropout
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, N, C = x.shape
@@ -160,12 +160,13 @@ class SpatialReductionAttention(nn.Module):
         q = q.view(B, -1, self.num_heads, self.head_dim).transpose(1, 2)  # (B, H, N, D)
         k = k.view(B, -1, self.num_heads, self.head_dim).transpose(1, 2)  # (B, H, N_red, D)
         v = v.view(B, -1, self.num_heads, self.head_dim).transpose(1, 2)  # (B, H, N_red, D)
+        
+        out = _run_sdpa(
+                q, k, v,
+                attn_mask=None,
+                dropout_p=self.dropout_p
+        )
 
-        att = (q @ k.transpose(-2, -1)) * self.scale  # (B, H, N, N_red)
-        att = F.softmax(att, dim=-1)
-        att = self.dropout(att)
-
-        out = att @ v  # (B, H, N, D)
         out = out.transpose(1, 2).contiguous().view(B, N, C)  # (B, N, C)
 
         return self.out_proj(out)
@@ -455,4 +456,4 @@ class SegFormerB0(nn.Module):
 patch = Patch
 Multi_Head_Attention = SpatialReductionAttention
 transformer_block = TransformerBlock
-transformer_encoder = TransformerEncoder
+transformer_encoder = TransformerEncoder
