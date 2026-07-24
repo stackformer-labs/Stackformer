@@ -23,7 +23,13 @@ def test_training_save_load_and_resume(tmp_path, torch_device):
     loader = DataLoader(TensorDataset(x, y), batch_size=6)
 
     _checkpoint("Fitting initial Trainer checkpoint")
-    trainer = Trainer(model=TinyTokenModel(), train_dataloader=loader, device=str(torch_device), max_epochs=2, checkpoint_dir=str(tmp_path))
+    trainer = Trainer(
+        model=TinyTokenModel(),
+        train_dataloader=loader,
+        device=str(torch_device),
+        max_epochs=2,
+        checkpoint_dir=str(tmp_path),
+    )
     trainer.fit()
     ckpt = tmp_path / "checkpoint_latest.pt"
     assert ckpt.exists()
@@ -36,7 +42,11 @@ def test_training_save_load_and_resume(tmp_path, torch_device):
         device=str(torch_device),
         max_epochs=3,
         checkpoint_dir=str(tmp_path),
-        resume_from=str(ckpt),
+        # Trainer.load()/CheckpointManager.load() take a checkpoint *name*
+        # ("latest", "best", ...) resolved against checkpoint_dir -- not an
+        # absolute path. save("latest") writes "checkpoint_latest.pt" under
+        # checkpoint_dir, so this must match that naming scheme.
+        resume_from="latest",
     )
     resumed.fit()
 
