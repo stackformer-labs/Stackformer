@@ -36,7 +36,11 @@ def test_trainer_loop_executes_with_amp_on_cpu(tmp_path, torch_device):
     _checkpoint("Fitting trainer with CPU AMP fallback")
     trainer.fit()
 
-    _checkpoint("Asserting steps completed and scaler disabled", global_step=trainer.state.global_step, is_enabled=trainer.scaler.is_enabled)
+    _checkpoint(
+        "Asserting steps completed and scaler disabled",
+        global_step=trainer.state.global_step,
+        is_enabled=trainer.scaler.is_enabled,
+    )
     assert trainer.state.global_step == 3
     assert trainer.scaler.is_enabled is False
     assert (tmp_path / "checkpoint_latest.pt").exists()
@@ -51,6 +55,12 @@ def test_trainer_subset_dataloader_resume_behavior(tmp_path, torch_device):
     subset = Subset(full_dataset, range(20))
     loader = DataLoader(subset, batch_size=4, shuffle=True)
 
+    # seed is required for Trainer._build_resume_dataloader to take the
+    # deterministic RandomSampler-reconstruction path (Case 1) instead of
+    # silently falling back to sequential resume (Case 2), which is what
+    # this test is actually meant to exercise.
+    seed = 1234
+
     trainer = Trainer(
         model=TinyLM().to(torch_device),
         train_dataloader=loader,
@@ -58,19 +68,24 @@ def test_trainer_subset_dataloader_resume_behavior(tmp_path, torch_device):
         max_epochs=1,
         max_train_steps=2,
         checkpoint_dir=str(tmp_path),
+        seed=seed,
     )
     _checkpoint("Fitting trainer on subset dataloader")
     trainer.fit()
     ckpt = tmp_path / "checkpoint_latest.pt"
     assert ckpt.exists()
 
+    # CheckpointManager.load()/Trainer.load() take a checkpoint *name*
+    # (resolved against checkpoint_dir), not an absolute path -- mirrors
+    # how save("latest") writes "checkpoint_latest.pt" under checkpoint_dir.
     resumed = Trainer(
         model=TinyLM().to(torch_device),
         train_dataloader=loader,
         device=str(torch_device),
         max_epochs=2,
         checkpoint_dir=str(tmp_path),
-        resume_from=str(ckpt),
+        seed=seed,
+        resume_from="latest",
     )
     _checkpoint("Fitting resumed trainer on subset dataloader")
     resumed.fit()

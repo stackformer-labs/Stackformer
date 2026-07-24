@@ -29,7 +29,10 @@ def test_checkpoint_manager_save_and_load(tmp_path, torch_device):
     restored_opt = torch.optim.Adam(restored.parameters(), lr=1e-3)
 
     _checkpoint("Loading checkpoint via CheckpointManager")
-    meta = manager.load(str(tmp_path / "checkpoint_unit.pt"), {"model": restored, "optimizer": restored_opt})
+    # load() takes the checkpoint *name* (matching the `name=` passed to
+    # save()), not a file path -- it derives
+    # checkpoint_<name>.safetensors / checkpoint_<name>.pt internally.
+    meta = manager.load("unit", {"model": restored, "optimizer": restored_opt})
 
     _checkpoint("Asserting restored metadata fields")
     assert meta["epoch"] == 2
@@ -55,7 +58,10 @@ def test_resume_training_from_checkpoint(tmp_path, torch_device):
         device=str(torch_device),
         max_epochs=2,
         checkpoint_dir=str(tmp_path),
-        resume_from=str(ckpt_path),
+        # resume_from is a checkpoint *name* (e.g. "latest", "best"),
+        # not a path -- Trainer.save()/load() always write/read
+        # checkpoint_<name>.* under checkpoint_dir.
+        resume_from="latest",
     )
     resumed.fit()
 

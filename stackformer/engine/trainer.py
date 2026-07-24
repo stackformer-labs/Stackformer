@@ -41,7 +41,7 @@ class Trainer:
         grad_accumulation_step: Gradient accumulation factor.
         max_grad_norm: Optional gradient clipping norm.
         checkpoint_dir: Checkpoint directory.
-        resume_from: Optional checkpoint path to restore.
+        resume_from: Optional checkpoint name (e.g. "latest", "best")to restore.
         monitor: Optional logging backend object with ``log(dict)``.
         scaler: Optional AMP scaler wrapper.
         use_ddp: If ``True``, initialize and use DistributedDataParallel.
@@ -54,6 +54,21 @@ class Trainer:
         total_steps: Total steps for step-based schedulers.
         max_steps: Backward-compatible alias for ``max_train_steps``.
         max_eval_step: Backward-compatible alias for ``max_eval_steps``.
+        sharded_checkpoint: If ``True``, ``save()``/``load()`` use DCP
+            (``CheckpointManager.save_sharded`` / ``load_sharded``): every
+            rank writes/reads only its own parameter shard, and shards are
+            never gathered into a single file. Use this for large
+            FSDP/FSDP2 models where a full gather is too expensive/won't
+            fit. Default ``False`` uses the consolidated SafeTensors +
+            torch.save checkpoint (full, shareable weights), which is
+            still FSDP-correct but pays a gather/scatter cost on every
+            save/load.
+        broadcast_weights_from_rank0: Only relevant when
+            ``sharded_checkpoint=False``. If ``True``, only rank 0 reads
+            the SafeTensors weights file on ``load()`` and DCP
+            broadcasts/reshards it to other ranks, instead of every rank
+            reading its own copy. Useful for very large models on shared
+            storage.
     """
 
     def __init__(
@@ -89,6 +104,8 @@ class Trainer:
         max_steps: Optional[int] = None,
         max_eval_step: Optional[int] = None,
         training_config: Optional[TrainingConfig] = None,
+        sharded_checkpoint: bool = False,
+        broadcast_weights_from_rank0: bool = False,
     ):
         if model is None:
             raise ValueError("`model` must be provided.")
@@ -132,6 +149,8 @@ class Trainer:
         self.ddp_backend = ddp_backend
         self.resume_from = resume_from
         self.checkpoint_dir = checkpoint_dir
+        self.sharded_checkpoint = bool(sharded_checkpoint)
+        self.broadcast_weights_from_rank0 = bool(broadcast_weights_from_rank0)
 
         self.lr = cfg.lr
         self.weight_decay = cfg.weight_decay
@@ -347,8 +366,11 @@ class Trainer:
             self.engine.train_one_epoch(train_loader, epoch)
 
             if self.engine.reached_max_train_steps():
-                if is_main_process():
-                    self.save("latest")
+                # Collective when sharded/FSDP -- every rank must call
+                # save(); CheckpointManager gates the actual disk I/O
+                # internally (and needs every rank for the DCP/full-gather
+                # collective ops either way).
+                self.save("latest")
                 break
 
             if self.val_loader is not None and ((epoch + 1) % self.eval_every_n_epochs == 0):
@@ -357,7 +379,7 @@ class Trainer:
             self.state.reset_batch()
             self.state.next_epoch()
 
-            if is_main_process() and ((epoch + 1) % self.save_every_n_epochs == 0):
+            if (epoch + 1) % self.save_every_n_epochs == 0:
                 self.save("latest")
 
     def validate(self) -> None:
@@ -367,11 +389,17 @@ class Trainer:
 
     def save(self, name: str = "latest", export_jit: bool = False) -> None:
         jit_path = None
+
         if export_jit:
             try:
-                jit_path = self.checkpoint_manager.save_jit_model(self.model, f"{name}_model")
+                jit_path = self.checkpoint_manager.save_jit_model(
+                    self.model,
+                    f"{name}_model",
+                )
             except Exception as exc:
-                print_once(f"[Trainer] TorchScript export skipped: {exc}")
+                print_once(
+                    f"[Trainer] TorchScript export skipped: {exc}"
+                )
 
         state = {
             "model": self.model,
@@ -382,22 +410,49 @@ class Trainer:
             "global_step": self.state.global_step,
             "batch_idx": self.state.batch_idx,
             "seed": self.seed,
+            "config": {
+                "lr": self.lr,
+                "weight_decay": self.weight_decay,
+                "optimizer_name": self.optimizer_name,
+                "scheduler_name": self.scheduler_name,
+                "warmup_steps": self.warmup_steps,
+                "total_steps": self.total_steps,
+                "criterion": getattr(self.criterion, "__name__", str(self.criterion)),
+            },
             "jit_model_path": jit_path,
         }
-        self.checkpoint_manager.save(state, name)
 
-    def load(self, checkpoint_path: str) -> None:
+        # Both paths are collective when the model is sharded (FSDP) --
+        # this must run on every rank. CheckpointManager gates the actual
+        # file writes to the main process internally.
+        if self.sharded_checkpoint:
+            self.checkpoint_manager.save_sharded(state, name)
+        else:
+            self.checkpoint_manager.save(state, name)
+
+    def load(self, checkpoint: str = "latest") -> None:
         state = {
             "model": self.model,
             "optimizer": self.optimizer,
             "scheduler": self.scheduler,
             "scaler": self.scaler,
         }
-        metadata = self.checkpoint_manager.load(checkpoint_path, state)
+
+        if self.sharded_checkpoint:
+            metadata = self.checkpoint_manager.load_sharded(checkpoint, state)
+        else:
+            metadata = self.checkpoint_manager.load(
+                checkpoint,
+                state,
+                broadcast_from_rank0=self.broadcast_weights_from_rank0,
+            )
+
         self.state.load_metadata(metadata)
-        if "seed" in metadata:
+
+        if metadata.get("seed") is not None:
             self.seed = metadata["seed"]
-        print_once(f"[Trainer] Resumed from {checkpoint_path}")
+
+        print_once(f"[Trainer] Resumed from checkpoint '{checkpoint}'")
 
     def export_torchscript(self, name: str = "inference_model") -> str:
         """Export current model as TorchScript artifact and return path."""
