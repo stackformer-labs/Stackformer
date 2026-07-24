@@ -1,33 +1,9 @@
-"""Checkpoint save/load utilities.
+"""Checkpoint save and load utilities for StackFormer models.
 
-Three complementary, purpose-built checkpoint mechanisms live here:
-
-1. SafeTensors (``save`` / ``load``)
-   Full, *consolidated* model weights. Always a single, unsharded
-   state_dict written by the main process -- safe to publish, diff, or
-   load into a plain ``nn.Module`` elsewhere. Works for plain, DDP-, or
-   FSDP/FSDP2-wrapped models: sharded parameters are gathered into a
-   full state_dict first (a collective op), so every rank must call
-   ``save`` / ``load`` even though only rank 0 touches disk.
-
-2. torch.save (also part of ``save`` / ``load``)
-   The "private" resume state that rides alongside the weights: full
-   optimizer state, scheduler state, AMP scaler state, epoch/step
-   counters, seed, and the training config (lr, loss fn, ...). Not meant
-   to be shared -- only to resume *this* run.
-
-3. DCP -- torch.distributed.checkpoint (``save_sharded`` / ``load_sharded``)
-   For models whose parameters are sharded across ranks (FSDP/FSDP2,
-   tensor-parallel, ...). Every rank writes only its own shard; shards
-   are *never* gathered or merged into one file. Restoring can happen at
-   a different world size -- DCP reshards automatically. This is the
-   cheap, scalable path for routine checkpointing of large models;
-   reserve ``save``/``load`` for occasional, exportable snapshots.
-
-Notes on torch version support: (1)/(2) are FSDP-aware and (3) works at
-all only on torch>=2.2 (``torch.distributed.checkpoint.state_dict``). On
-older torch, (1)/(2) silently fall back to plain ``.state_dict()`` (fine
-for plain/DDP models, incorrect for FSDP) and (3) raises a clear error.
+Provides three complementary checkpoint mechanisms:
+1. SafeTensors (`save` / `load`): Full consolidated model weights file safe for export.
+2. PyTorch State (`save` / `load`): Full optimizer, scheduler, scaler, and training state dictionary.
+3. Distributed Checkpoint (`save_sharded` / `load_sharded`): High-performance sharded DCP checkpointing.
 """
 
 from __future__ import annotations
@@ -59,32 +35,32 @@ except ImportError:  # torch < 2.2: no DCP state-dict helpers available
     _DCP_AVAILABLE = False
 
     class Stateful:  # type: ignore[no-redef]
-        """No-op stand-in so this module still imports on old torch."""
+        """No-op stand-in for Stateful on PyTorch versions prior to 2.2."""
 
 
 class _AppState(Stateful):
-    """Wraps model (+ optimizer) so DCP can save/load their *sharded*
-    local state directly -- no gathering, no merging.
+    """Wraps model and optimizer for Distributed Checkpoint (DCP) sharded state handling.
 
-    Works uniformly whether ``model`` is plain, DDP-, or FSDP/FSDP2-
-    wrapped: ``get_state_dict`` / ``set_state_dict`` resolve the correct
-    (replicated vs. sharded/DTensor) representation on their own. This
-    mirrors the pattern from PyTorch's own DCP tutorial.
+    Args:
+        model (torch.nn.Module): Target model instance.
+        optimizer (torch.optim.Optimizer | None, default=None): Optional optimizer instance.
     """
 
     def __init__(
         self,
         model: torch.nn.Module,
         optimizer: Optional[torch.optim.Optimizer] = None,
-    ):
+    ) -> None:
         self.model = model
         self.optimizer = optimizer
 
     def state_dict(self) -> Dict[str, Any]:
+        """Return model and optimizer state dictionaries via DCP helper."""
         model_state, optim_state = get_state_dict(self.model, self.optimizer)
         return {"model": model_state, "optim": optim_state}
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+        """Restore model and optimizer state dictionaries via DCP helper."""
         set_state_dict(
             self.model,
             self.optimizer,
@@ -94,32 +70,31 @@ class _AppState(Stateful):
 
 
 class CheckpointManager:
-    """Manage model checkpoints."""
+    """Manages saving and loading of model weights and training execution state.
+
+    Constructor args:
+        output_dir (str): Parent directory path to store checkpoint files.
+        device (str | torch.device, default="cpu"): Target compute device for loaded state.
+    """
 
     def __init__(
         self,
         output_dir: str,
         device: str | torch.device = "cpu",
-    ):
+    ) -> None:
         self.output_dir = Path(output_dir)
         self.device = torch.device(device)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Consolidated: SafeTensors (weights) + torch.save (everything else)
     def save(self, state: Dict[str, Any], name: str = "latest") -> Dict[str, str] | None:
-        """
-        Save a consolidated, shareable checkpoint: full model weights
-        (SafeTensors) + full training state (torch.save).
+        """Save consolidated SafeTensors weights and PyTorch training state.
 
-        Collective when the model is sharded (FSDP/FSDP2): gathering a
-        full state_dict needs every rank's participation, so call this
-        on *every* rank. Only the main process writes to disk.
+        Args:
+            state (Dict[str, Any]): Dictionary containing 'model', optional 'optimizer', 'scheduler', etc.
+            name (str, default="latest"): Checkpoint file identifier suffix.
 
-        Returns
-        -------
-        dict
-            {"weights": "...safetensors", "state": "...pt"}
-            None on non-main ranks.
+        Returns:
+            Dict[str, str] | None: Dictionary of saved file paths on rank 0, or None on worker ranks.
         """
         model = state.get("model")
         if model is None:
@@ -152,20 +127,15 @@ class CheckpointManager:
         state: Dict[str, Any],
         broadcast_from_rank0: bool = False,
     ) -> Dict[str, Any]:
-        """
-        Restore model + training state saved by ``save``.
+        """Restore model weights and training progress metrics from a saved checkpoint.
 
-        Parameters
-        ----------
-        name
-            Checkpoint name (e.g. "latest", "best")
-        broadcast_from_rank0
-            If True (needs torch>=2.2 and a live process group), only
-            rank 0 reads the SafeTensors weights file and DCP reshards
-            it out to every other rank -- use for large FSDP models on
-            shared storage to avoid every rank paying the read cost.
-            Default False: every rank reads its own copy, which is
-            simpler and needs no process group.
+        Args:
+            name (str): Checkpoint identifier name (e.g. "latest", "best").
+            state (Dict[str, Any]): Dictionary containing target 'model' and optional 'optimizer'.
+            broadcast_from_rank0 (bool, default=False): Broadcast rank 0 weights across workers.
+
+        Returns:
+            Dict[str, Any]: Restored training metadata (epoch, global_step, batch_idx, config, seed).
         """
         weights_path = self._weights_path(name)
         state_path = self._state_path(name)
@@ -206,17 +176,15 @@ class CheckpointManager:
             "jit_model_path": checkpoint.get("jit_model_path"),
         }
 
-    # Sharded: DCP -- shards written independently, never merged
     def save_sharded(self, state: Dict[str, Any], name: str = "latest") -> Dict[str, str]:
-        """
-        Save each rank's local shard of the model (+ optimizer) via DCP.
-        Shards are never gathered into one file -- cheap and scalable
-        for large FSDP/FSDP2 models.
+        """Save per-rank sharded checkpoint directory via Distributed Checkpoint (DCP).
 
-        Collective: every rank must call this (it writes its own shard).
-        Small, rank-identical bookkeeping (epoch/step/config/seed/
-        scheduler/scaler) is still written once, by the main process, as
-        a plain torch.save file next to the DCP shards.
+        Args:
+            state (Dict[str, Any]): State dictionary containing 'model' and optional 'optimizer'.
+            name (str, default="latest"): Checkpoint name suffix.
+
+        Returns:
+            Dict[str, str]: Dictionary containing path to sharded directory and metadata file.
         """
         self._require_dcp()
 
@@ -224,8 +192,6 @@ class CheckpointManager:
         if model is None:
             raise ValueError("state['model'] is required.")
 
-        # Do NOT unwrap DDP/FSDP here -- get_state_dict needs the wrapped
-        # module to know how the parameters are sharded/replicated.
         app_state = _AppState(model, state.get("optimizer"))
 
         ckpt_dir = self._sharded_dir(name)
@@ -246,14 +212,14 @@ class CheckpointManager:
         return result
 
     def load_sharded(self, name: str, state: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Restore a checkpoint written by ``save_sharded``.
+        """Restore sharded model and optimizer state via Distributed Checkpoint (DCP).
 
-        Collective: every rank must call this. ``state['model']`` (and
-        optimizer, if resuming it) must already be constructed with
-        whatever sharding layout *this* run uses -- it need not match
-        the world size that wrote the checkpoint; DCP reshards
-        automatically.
+        Args:
+            name (str): Checkpoint identifier name.
+            state (Dict[str, Any]): State dictionary containing target 'model' and optional 'optimizer'.
+
+        Returns:
+            Dict[str, Any]: Restored training metadata.
         """
         self._require_dcp()
 
@@ -292,9 +258,16 @@ class CheckpointManager:
             "jit_model_path": checkpoint.get("jit_model_path"),
         }
 
-    # TorchScript
-    def save_jit_model( self, model: torch.nn.Module, name: str = "latest",) -> str:
+    def save_jit_model(self, model: torch.nn.Module, name: str = "latest") -> str:
+        """Export TorchScript compiled model artifact to disk.
 
+        Args:
+            model (torch.nn.Module): Model instance to compile and save.
+            name (str, default="latest"): Output filename identifier.
+
+        Returns:
+            str: Path to saved TorchScript file (or empty string on non-main process).
+        """
         if not is_main_process():
             return ""
 
@@ -316,26 +289,30 @@ class CheckpointManager:
             if tmp.exists():
                 tmp.unlink()
 
-            raise RuntimeError(
-                f"TorchScript save failed: {exc}"
-            ) from exc
+            raise RuntimeError(f"TorchScript save failed: {exc}") from exc
 
-    def load_jit_model( self, path: str,) -> torch.jit.ScriptModule:
+    def load_jit_model(self, path: str) -> torch.jit.ScriptModule:
+        """Load compiled TorchScript module from file.
 
-        path = Path(path)
+        Args:
+            path (str): Filepath to TorchScript module.
 
-        if not path.exists():
-            raise FileNotFoundError(path)
+        Returns:
+            torch.jit.ScriptModule: Loaded TorchScript module in eval mode.
+        """
+        file_path = Path(path)
+
+        if not file_path.exists():
+            raise FileNotFoundError(file_path)
 
         model = torch.jit.load(
-            str(path),
+            str(file_path),
             map_location=self.device,
         )
 
         model.eval()
         return model
 
-    # Paths
     def _weights_path(self, name: str) -> Path:
         return self.output_dir / f"checkpoint_{name}.safetensors"
 
@@ -351,21 +328,11 @@ class CheckpointManager:
     def _sharded_meta_path(self, name: str) -> Path:
         return self._sharded_dir(name) / "train_state.pt"
 
-    # Full-state gather/scatter helpers (SafeTensors + torch.save path)
     @staticmethod
     def _gather_full_state(
         model: torch.nn.Module,
         optimizer: Optional[torch.optim.Optimizer],
-    ):
-        """
-        Collective-safe gather of a full (unsharded) model/optimizer
-        state dict, regardless of wrapping (plain / DDP / FSDP/FSDP2).
-
-        Must be called on every rank when the model may be sharded: DCP's
-        ``full_state_dict=True`` all-gathers shards onto rank 0 and
-        returns an empty dict everywhere else, so this is safe to gate
-        on ``is_main_process()`` immediately afterwards.
-        """
+    ) -> tuple[Dict[str, torch.Tensor], Optional[Dict[str, Any]]]:
         if _DCP_AVAILABLE:
             options = StateDictOptions(full_state_dict=True, cpu_offload=True)
 
@@ -382,9 +349,6 @@ class CheckpointManager:
             )
             return model_state, optimizer_state
 
-        # Fallback for torch < 2.2: no sharded-state helpers, so `model`
-        # is assumed plain or DDP-wrapped (state_dict() is already the
-        # full, replicated state).
         unwrapped = CheckpointManager._unwrap_model(model)
         model_state = {
             k: v.detach().cpu().contiguous() for k, v in unwrapped.state_dict().items()
@@ -460,7 +424,6 @@ class CheckpointManager:
                 f"torch=={torch.__version__}."
             )
 
-    # Helpers
     @staticmethod
     def _unwrap_model(model: torch.nn.Module) -> torch.nn.Module:
         return model.module if hasattr(model, "module") else model
@@ -480,8 +443,7 @@ class CheckpointManager:
         obj: Any,
         state_dict: Optional[Dict[str, Any]],
         label: str,
-    ):
-
+    ) -> None:
         if obj is None or state_dict is None:
             return
 
@@ -492,16 +454,13 @@ class CheckpointManager:
             obj.load_state_dict(state_dict)
 
         except Exception as exc:
-            print_once(
-                f"[Checkpoint] Warning: failed to restore {label}: {exc}"
-            )
+            print_once(f"[Checkpoint] Warning: failed to restore {label}: {exc}")
 
     @staticmethod
     def _safe_torch_save(
         obj: Dict[str, Any],
         path: Path,
-    ):
-
+    ) -> None:
         tmp = path.with_suffix(path.suffix + ".tmp")
 
         try:
@@ -516,8 +475,7 @@ class CheckpointManager:
     def _safe_save_safetensors(
         tensors: Dict[str, torch.Tensor],
         path: Path,
-    ):
-
+    ) -> None:
         tmp = path.with_suffix(path.suffix + ".tmp")
 
         try:
@@ -526,4 +484,4 @@ class CheckpointManager:
 
         finally:
             if tmp.exists():
-                tmp.unlink(missing_ok=True)
+                tmp.unlink(missing_ok=True)

@@ -1,27 +1,25 @@
-"""
-stackformer.optim.factories
+"""Optimizer and learning rate scheduler factory functions.
 
-Optimizer and scheduler factories.
-
-Supports:
-- LLM / Transformer training
-- Vision models (ViT, CNNs)
-- Segmentation models (SegFormer, UNet)
-- General PyTorch models
+Provides `create_optimizer`, `create_scheduler`, and parameter grouping utilities
+for LLM, Vision, and Segmentation models.
 """
 
 from __future__ import annotations
 
 import math
+from typing import Any, Dict, List
+
 import torch
-from torch.optim import Adam, AdamW, SGD, RMSprop, Adagrad
+import torch.nn as nn
+from torch.optim import SGD, Adam, AdamW, Adagrad, Optimizer, RMSprop
 from torch.optim.lr_scheduler import (
-    StepLR,
     CosineAnnealingLR,
     CosineAnnealingWarmRestarts,
     ExponentialLR,
-    ReduceLROnPlateau,
     LambdaLR,
+    LRScheduler,
+    ReduceLROnPlateau,
+    StepLR,
 )
 
 # Optimizer Registry
@@ -42,18 +40,17 @@ SCHEDULERS = {
     "plateau": ReduceLROnPlateau,
 }
 
-# Parameter Group Helpers
-def get_parameter_groups(model, weight_decay: float = 0.0):
-    """
-    Create parameter groups separating parameters that should
-    and should not use weight decay.
 
-    Important for:
-    - Transformers
-    - LLM training
-    - Vision Transformers
-    """
+def get_parameter_groups(model: nn.Module, weight_decay: float = 0.0) -> List[Dict[str, Any]]:
+    """Separate model parameters into weight decay and no-decay parameter groups.
 
+    Args:
+        model (nn.Module): Neural network model instance.
+        weight_decay (float, default=0.0): Weight decay penalty applied to eligible weight matrices.
+
+    Returns:
+        List[Dict[str, Any]]: List of dictionary parameter groups formatted for PyTorch optimizers.
+    """
     decay = []
     no_decay = []
 
@@ -73,23 +70,16 @@ def get_parameter_groups(model, weight_decay: float = 0.0):
     )
 
     for module_name, module in model.named_modules():
-
         for param_name, param in module.named_parameters(recurse=False):
-
             if not param.requires_grad:
                 continue
 
-            full_name = f"{module_name}.{param_name}" if module_name else param_name
-
             if param_name.endswith("bias"):
                 no_decay.append(param)
-
             elif isinstance(module, whitelist_weight_modules):
                 decay.append(param)
-
             elif isinstance(module, blacklist_weight_modules):
                 no_decay.append(param)
-
             else:
                 decay.append(param)
 
@@ -98,171 +88,173 @@ def get_parameter_groups(model, weight_decay: float = 0.0):
         {"params": no_decay, "weight_decay": 0.0},
     ]
 
-# Optimizer Factory
+
 def create_optimizer(
-    model,
+    model: nn.Module,
     optimizer_name: str = "adamw",
     lr: float = 3e-4,
     weight_decay: float = 0.01,
     momentum: float = 0.9,
-):
+) -> Optimizer:
+    """Instantiate optimizer with weight decay parameter grouping.
+
+    Args:
+        model (nn.Module): Neural network model instance.
+        optimizer_name (str, default="adamw"): Optimizer backend ("adamw", "adam", "sgd", "rmsprop", "adagrad").
+        lr (float, default=3e-4): Base learning rate.
+        weight_decay (float, default=0.01): Weight decay penalty value.
+        momentum (float, default=0.9): Momentum coefficient (for SGD).
+
+    Returns:
+        Optimizer: Constructed PyTorch optimizer instance.
     """
-    Create optimizer.
+    opt_name = optimizer_name.lower()
 
-    Works well for:
-    - GPT / LLM
-    - BERT / Transformers
-    - Vision Transformers
-    - SegFormer
-    - CNN models
-    """
-
-    optimizer_name = optimizer_name.lower()
-
-    if optimizer_name not in OPTIMIZERS:
+    if opt_name not in OPTIMIZERS:
         raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 
     params = get_parameter_groups(model, weight_decay)
 
-    if optimizer_name == "sgd":
-
+    if opt_name == "sgd":
         optimizer = SGD(
             params,
             lr=lr,
             momentum=momentum,
         )
-
     else:
-
-        optimizer = OPTIMIZERS[optimizer_name](
+        optimizer = OPTIMIZERS[opt_name](
             params,
             lr=lr,
         )
 
     return optimizer
 
-# Warmup Schedulers (important for Transformers)
-def linear_warmup_scheduler(optimizer, warmup_steps, total_steps):
 
+def linear_warmup_scheduler(
+    optimizer: Optimizer,
+    warmup_steps: int,
+    total_steps: int | None,
+) -> LambdaLR:
+    """Construct a linear warmup and linear decay learning rate scheduler.
+
+    Args:
+        optimizer (Optimizer): Target PyTorch optimizer instance.
+        warmup_steps (int): Number of warmup steps.
+        total_steps (int | None): Total step count.
+
+    Returns:
+        LambdaLR: Constructed LambdaLR scheduler.
+    """
     if total_steps is None:
         raise ValueError("total_steps must be provided for warmup schedulers")
 
-    def lr_lambda(step):
-
+    def lr_lambda(step: int) -> float:
         if step < warmup_steps:
             return float(step) / float(max(1, warmup_steps))
-
         return max(
             0.0,
-            float(total_steps - step)
-            / float(max(1, total_steps - warmup_steps)),
+            float(total_steps - step) / float(max(1, total_steps - warmup_steps)),
         )
 
     return LambdaLR(optimizer, lr_lambda)
 
 
-def cosine_warmup_scheduler(optimizer, warmup_steps, total_steps):
+def cosine_warmup_scheduler(
+    optimizer: Optimizer,
+    warmup_steps: int,
+    total_steps: int | None,
+) -> LambdaLR:
+    """Construct a linear warmup and cosine decay learning rate scheduler.
 
+    Args:
+        optimizer (Optimizer): Target PyTorch optimizer instance.
+        warmup_steps (int): Number of warmup steps.
+        total_steps (int | None): Total step count.
+
+    Returns:
+        LambdaLR: Constructed LambdaLR scheduler.
+    """
     if total_steps is None:
         raise ValueError("total_steps must be provided for warmup schedulers")
 
-    def lr_lambda(step):
-
+    def lr_lambda(step: int) -> float:
         if step < warmup_steps:
             return float(step) / float(max(1, warmup_steps))
 
-        progress = float(step - warmup_steps) / float(
-            max(1, total_steps - warmup_steps)
-        )
-
+        progress = float(step - warmup_steps) / float(max(1, total_steps - warmup_steps))
         return 0.5 * (1.0 + math.cos(math.pi * progress))
 
     return LambdaLR(optimizer, lr_lambda)
 
-# Scheduler Factory
+
 def create_scheduler(
-    optimizer,
+    optimizer: Optimizer,
     scheduler_name: str = "cosine",
     total_steps: int | None = None,
     warmup_steps: int = 0,
     step_size: int = 10,
     gamma: float = 0.1,
-):
+) -> LRScheduler | ReduceLROnPlateau:
+    """Instantiate a learning rate scheduler from configuration settings.
+
+    Args:
+        optimizer (Optimizer): PyTorch optimizer instance.
+        scheduler_name (str, default="cosine"): Scheduler type name.
+        total_steps (int | None, default=None): Total steps for step/cosine schedulers.
+        warmup_steps (int, default=0): Warmup step count.
+        step_size (int, default=10): Step interval for StepLR or CosineAnnealingWarmRestarts.
+        gamma (float, default=0.1): Decay multiplier factor.
+
+    Returns:
+        LRScheduler | ReduceLROnPlateau: Constructed learning rate scheduler instance.
     """
-    Create LR scheduler.
+    sched_name = scheduler_name.lower()
 
-    Common choices:
-
-    LLM / Transformers
-        cosine_warmup
-        linear_warmup
-
-    Vision / Segmentation
-        cosine
-        step
-
-    General
-        exponential
-        plateau
-    """
-
-    scheduler_name = scheduler_name.lower()
-
-    # Transformer schedulers
-    if scheduler_name == "linear_warmup":
-
+    if sched_name == "linear_warmup":
         return linear_warmup_scheduler(
             optimizer,
             warmup_steps,
             total_steps,
         )
 
-    if scheduler_name == "cosine_warmup":
-
+    if sched_name == "cosine_warmup":
         return cosine_warmup_scheduler(
             optimizer,
             warmup_steps,
             total_steps,
         )
 
-    # Standard schedulers
-    if scheduler_name == "cosine":
-
+    if sched_name == "cosine":
         if total_steps is None:
             raise ValueError("total_steps required for cosine scheduler")
-
         return CosineAnnealingLR(
             optimizer,
             T_max=total_steps,
         )
 
-    if scheduler_name == "cosine_restart":
-
+    if sched_name == "cosine_restart":
         return CosineAnnealingWarmRestarts(
             optimizer,
             T_0=step_size,
         )
 
-    if scheduler_name == "step":
-
+    if sched_name == "step":
         return StepLR(
             optimizer,
             step_size=step_size,
             gamma=gamma,
         )
 
-    if scheduler_name == "exponential":
-
+    if sched_name == "exponential":
         return ExponentialLR(
             optimizer,
             gamma=gamma,
         )
 
-    if scheduler_name == "plateau":
-
+    if sched_name == "plateau":
         return ReduceLROnPlateau(
             optimizer,
             factor=gamma,
         )
 
-    raise ValueError(f"Unsupported scheduler: {scheduler_name}")
+    raise ValueError(f"Unsupported scheduler: {scheduler_name}")

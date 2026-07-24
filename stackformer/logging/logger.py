@@ -1,4 +1,7 @@
-"""Unified logger interface for CSV/TensorBoard/W&B backends."""
+"""Unified logger interface for CSV, TensorBoard, and Weights & Biases backends.
+
+Provides `Logger` class to multiplex metric logging across enabled output sinks.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +14,26 @@ from stackformer.utils.utils import print_once
 
 
 class Logger:
-    """Multiplex metrics to one or more logging backends."""
+    """Multiplexes training metrics to one or more configured logging backends.
+
+    Simple explanation:
+        `Logger` routes key-value metric dictionaries to active CSV, TensorBoard,
+        or W&B loggers while isolating failures in individual backends.
+
+    Constructor args:
+        csv (bool, default=True): Enable CSV logging to file.
+        tensorboard (bool, default=False): Enable TensorBoard logging.
+        wandb (bool, default=False): Enable Weights & Biases logging.
+        log_dir (str, default="logs"): Parent directory path for log outputs.
+        experiment_name (str, default="run"): Name identifier for experiment.
+        wandb_project (str, default="stackformer"): W&B project name.
+        wandb_config (dict | None, default=None): Hyperparameter configuration dict for W&B.
+
+    Example:
+        >>> logger = Logger(csv=True, experiment_name="test_run")
+        >>> logger.log({"loss": 0.25, "lr": 1e-4})
+        >>> logger.close()
+    """
 
     def __init__(
         self,
@@ -22,7 +44,7 @@ class Logger:
         experiment_name: str = "run",
         wandb_project: str = "stackformer",
         wandb_config: dict | None = None,
-    ):
+    ) -> None:
         self.backends: List[Any] = []
         self._failed_backends: set[str] = set()
 
@@ -46,6 +68,11 @@ class Logger:
             print_once("[Logger] No logging backend enabled")
 
     def log(self, metrics: Dict[str, float]) -> None:
+        """Log key-value metrics dictionary to all active backends.
+
+        Args:
+            metrics (Dict[str, float]): Dictionary of metric names and numeric scalar values.
+        """
         if not metrics:
             return
         for backend in self.backends:
@@ -64,6 +91,7 @@ class Logger:
                     )
 
     def close(self) -> None:
+        """Flush buffers and safely close all active logging backends."""
         for backend in self.backends:
             try:
                 if hasattr(backend, "flush"):
@@ -75,8 +103,9 @@ class Logger:
             except Exception:
                 pass
 
-    def __del__(self):
+    def __del__(self) -> None:
         try:
             self.close()
         except Exception:
             pass
+

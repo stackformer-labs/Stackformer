@@ -1,4 +1,9 @@
-"""Example showing modular V3 trainer configuration."""
+"""Example script demonstrating modular Trainer API execution.
+
+Constructs a synthetic dataset and trains a basic embedding-linear model for 1 epoch.
+"""
+
+from __future__ import annotations
 
 import torch
 from torch import nn
@@ -7,7 +12,8 @@ from torch.utils.data import DataLoader, TensorDataset
 from stackformer.engine import Trainer
 
 
-def main():
+def main() -> None:
+    """Run simple trainer example."""
     torch.manual_seed(1)
     x = torch.randint(0, 8, (64, 5))
     y = torch.randint(0, 8, (64, 5))
@@ -32,3 +38,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

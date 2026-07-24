@@ -1,4 +1,14 @@
-"""Distributed training helpers for StackFormer."""
+"""Distributed training package providing DDP and FSDP initialization and process group helpers.
+
+Exposes:
+    - init_distributed: Initialize process group
+    - setup_ddp: Setup PyTorch DistributedDataParallel
+    - wrap_model_ddp: Wrap module in DistributedDataParallel
+    - distributed_sampler: Construct DistributedSampler for dataloaders
+    - get_rank, get_world_size, get_local_rank: Query process group metrics
+    - is_distributed, is_main_process: Process group rank predicates
+    - barrier, cleanup, cleanup_distributed: Process group synchronization and destruction
+"""
 
 from .ddp import (
     barrier,
@@ -29,3 +39,4 @@ __all__ = [
     "cleanup",
     "cleanup_distributed",
 ]
+

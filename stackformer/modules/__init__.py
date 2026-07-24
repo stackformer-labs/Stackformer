@@ -1,4 +1,14 @@
-"""Public module-level API for reusable Stackformer building blocks."""
+"""Modules package containing reusable Transformer building blocks for StackFormer.
+
+Exposes:
+    - Multi_Head_Attention, Group_query_Attention, Multi_query_Attention, Self_Attention, Cross_MultiHead_Attention: Attention components
+    - kv_cache_multihead, kv_cache_group_query: Stateful KV-cache attention implementations
+    - FF_GELU, FF_ReLU, FF_SwiGLU, FF_GeGLU, FF_SiLU, FF_LeakyReLU, FF_Sigmoid: Feed-forward networks
+    - LayerNormalization, RMSNormalization: Normalization layers
+    - AbsolutePositionEmbedding, SinusoidalPositionalEmbedding, RoPE: Position embeddings
+    - make_mask: Causal, padding, and sliding window mask generator
+    - BlockConfig, TransformerEncoder, TransformerDecoder: High-level block and backbone layers
+"""
 
 from .Attention import (
     Cross_MultiHead_Attention,
@@ -23,16 +33,15 @@ from .Feed_forward import (
 )
 from .Masking import make_mask
 from .Normalization import LayerNormalization, RMSNormalization
+from .layer import (
+    BlockConfig,
+    TransformerDecoder,
+    TransformerEncoder,
+)
 from .position_embedding import (
     AbsolutePositionEmbedding,
     RoPE,
     SinusoidalPositionalEmbedding,
-)
-
-from .layer import (
-    BlockConfig, 
-    TransformerEncoder, 
-    TransformerDecoder,
 )
 
 TokenizerImportError: Exception | None = None
@@ -65,7 +74,7 @@ __all__ = [
     "RoPE",
     "Self_Attention",
     "SinusoidalPositionalEmbedding",
-    "TransformerEncoder", 
+    "TransformerEncoder",
     "TransformerDecoder",
     "kv_cache_group_query",
     "kv_cache_multihead",
@@ -74,3 +83,4 @@ __all__ = [
 
 if Embedding_using_tiktoken is not None:
     __all__.append("Embedding_using_tiktoken")
+

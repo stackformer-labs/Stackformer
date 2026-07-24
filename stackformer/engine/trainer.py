@@ -1,8 +1,12 @@
-"""High-level Trainer API for StackFormer V2."""
+"""High-level Trainer API for model training, validation, and checkpoint management.
+
+Provides `Trainer` class to orchestrate end-to-end training loops with DDP, AMP, gradient accumulation,
+and checkpointing.
+"""
 
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Dict, Optional
 
 import torch
 from torch.utils.data import DataLoader, Subset
@@ -21,54 +25,50 @@ from stackformer.utils.utils import is_main_process, print_once, seed_everything
 
 
 class Trainer:
-    """Configurable trainer for research workloads.
+    """Configurable training loop orchestrator for single-GPU and distributed research workloads.
 
-    Args:
-        model: Model to train.
-        train_dataloader: Training dataloader.
-        val_dataloader: Validation dataloader.
-        optimizer: Optional externally created optimizer.
-        scheduler: Optional externally created scheduler.
-        criterion: Optional custom loss callable. If ``None``, language-modeling
-            cross-entropy is used.
-        device: ``"auto"`` or explicit torch device string.
-        seed: Optional reproducibility seed.
-        max_epochs: Maximum number of epochs.
-        max_train_steps: Optional limit on optimizer steps.
-        max_eval_steps: Optional limit on validation iterations per epoch.
-        eval_every_n_epochs: Validation cadence.
-        save_every_n_epochs: Checkpoint cadence.
-        grad_accumulation_step: Gradient accumulation factor.
-        max_grad_norm: Optional gradient clipping norm.
-        checkpoint_dir: Checkpoint directory.
-        resume_from: Optional checkpoint name (e.g. "latest", "best")to restore.
-        monitor: Optional logging backend object with ``log(dict)``.
-        scaler: Optional AMP scaler wrapper.
-        use_ddp: If ``True``, initialize and use DistributedDataParallel.
-        ddp_backend: Optional torch distributed backend (e.g. ``"nccl"``).
-        lr: Learning rate when optimizer is auto-created.
-        weight_decay: Weight decay when optimizer is auto-created.
-        optimizer_name: Optimizer factory key.
-        scheduler_name: Scheduler factory key.
-        warmup_steps: Warmup steps for warmup schedulers.
-        total_steps: Total steps for step-based schedulers.
-        max_steps: Backward-compatible alias for ``max_train_steps``.
-        max_eval_step: Backward-compatible alias for ``max_eval_steps``.
-        sharded_checkpoint: If ``True``, ``save()``/``load()`` use DCP
-            (``CheckpointManager.save_sharded`` / ``load_sharded``): every
-            rank writes/reads only its own parameter shard, and shards are
-            never gathered into a single file. Use this for large
-            FSDP/FSDP2 models where a full gather is too expensive/won't
-            fit. Default ``False`` uses the consolidated SafeTensors +
-            torch.save checkpoint (full, shareable weights), which is
-            still FSDP-correct but pays a gather/scatter cost on every
-            save/load.
-        broadcast_weights_from_rank0: Only relevant when
-            ``sharded_checkpoint=False``. If ``True``, only rank 0 reads
-            the SafeTensors weights file on ``load()`` and DCP
-            broadcasts/reshards it to other ranks, instead of every rank
-            reading its own copy. Useful for very large models on shared
-            storage.
+    Simple explanation:
+        `Trainer` automates setup of optimizer, learning rate scheduler, device placement,
+        gradient accumulation, automatic mixed precision (AMP), logging, and checkpointing.
+
+    Constructor args:
+        model (torch.nn.Module): Neural network model to train.
+        train_dataloader (DataLoader | None, default=None): Training DataLoader.
+        val_dataloader (DataLoader | None, default=None): Validation DataLoader.
+        optimizer (torch.optim.Optimizer | None, default=None): Optional custom optimizer.
+        scheduler (Any | None, default=None): Optional custom learning rate scheduler.
+        criterion (Callable | None, default=None): Loss calculation callable (defaults to LM cross-entropy).
+        device (str, default="auto"): Compute device selection ("auto", "cpu", "cuda").
+        seed (int | None, default=None): Random seed for reproducibility.
+        max_epochs (int, default=1): Total number of training epochs.
+        max_train_steps (int | None, default=None): Optional maximum step limit.
+        max_eval_steps (int | None, default=None): Optional evaluation step limit.
+        eval_every_n_epochs (int, default=1): Validation frequency in epochs.
+        save_every_n_epochs (int, default=1): Checkpoint frequency in epochs.
+        grad_accumulation_step (int, default=1): Gradient accumulation factor.
+        max_grad_norm (float | None, default=None): Gradient norm clipping threshold.
+        checkpoint_dir (str, default="checkpoints"): Directory path to store saved checkpoints.
+        resume_from (str | None, default=None): Checkpoint name to restore at initialization.
+        monitor (Any | None, default=None): Logging backend monitor instance.
+        scaler (Any | None, default=None): Custom AMP GradScaler.
+        use_amp (bool, default=False): Enable automatic mixed precision.
+        use_ddp (bool, default=False): Enable DistributedDataParallel wrapping.
+        ddp_backend (str | None, default=None): PyTorch distributed backend ("nccl", "gloo").
+        lr (float, default=3e-4): Learning rate for auto-created optimizer.
+        weight_decay (float, default=0.01): Weight decay parameter.
+        optimizer_name (str, default="adamw"): Optimizer name ("adamw", "adam", "sgd").
+        scheduler_name (str, default="none"): LR scheduler name ("cosine", "linear", "none").
+        warmup_steps (int, default=0): Number of warmup steps for LR scheduler.
+        total_steps (int | None, default=None): Total training steps for scheduler.
+        max_steps (int | None, default=None): Backward-compatible alias for max_train_steps.
+        max_eval_step (int | None, default=None): Backward-compatible alias for max_eval_steps.
+        training_config (TrainingConfig | None, default=None): Optional TrainingConfig object.
+        sharded_checkpoint (bool, default=False): Save/load via Distributed Checkpoint (DCP).
+        broadcast_weights_from_rank0 (bool, default=False): Broadcast rank 0 weights on load.
+
+    Example:
+        >>> trainer = Trainer(model=model, train_dataloader=train_loader, max_epochs=5)
+        >>> trainer.fit()
     """
 
     def __init__(
@@ -106,7 +106,7 @@ class Trainer:
         training_config: Optional[TrainingConfig] = None,
         sharded_checkpoint: bool = False,
         broadcast_weights_from_rank0: bool = False,
-    ):
+    ) -> None:
         if model is None:
             raise ValueError("`model` must be provided.")
 
@@ -208,7 +208,7 @@ class Trainer:
             self.model = wrap_model_ddp(self.model)
         print_device_info()
 
-    def _validate_optimizer_device(self):
+    def _validate_optimizer_device(self) -> None:
         if self.optimizer is None:
             return
 
@@ -219,10 +219,8 @@ class Trainer:
                 if param.device != model_device:
                     raise ValueError(
                         "The supplied optimizer references parameters on "
-                        f"{param.device}, but the model is on "
-                        f"{model_device}.\n\n"
-                        "Move the model before creating the optimizer, or "
-                        "let Trainer create the optimizer."
+                        f"{param.device}, but the model is on {model_device}.\n\n"
+                        "Move the model before creating the optimizer, or let Trainer create the optimizer."
                     )
 
     def _setup_scaler(self) -> None:
@@ -236,7 +234,9 @@ class Trainer:
         if not is_main_process():
             self.monitor = None
             return
-        self.monitor = Logger(csv=True, tensorboard=False, wandb=False, log_dir="logs", experiment_name="stackformer")
+        self.monitor = Logger(
+            csv=True, tensorboard=False, wandb=False, log_dir="logs", experiment_name="stackformer"
+        )
 
     def _setup_optimizer(self) -> None:
         if self.optimizer is not None:
@@ -269,20 +269,13 @@ class Trainer:
         self,
         dataloader: Optional[DataLoader],
     ) -> Optional[DataLoader]:
-        """
-        Rebuild a dataloader for checkpoint resumption.
+        """Rebuild a dataloader for deterministic checkpoint resumption.
 
-        For deterministic shuffled dataloaders, this reconstructs the same
-        permutation by reseeding a Generator with ``seed + epoch`` and skips
-        samples already processed.
+        Args:
+            dataloader (DataLoader | None): Base DataLoader instance.
 
-        Exact resumption is only supported when:
-
-        - Trainer was created with ``seed=...``
-        - DataLoader uses RandomSampler (shuffle=True)
-        - No custom sampler is supplied
-
-        Otherwise, the loader falls back to sequential resumption.
+        Returns:
+            DataLoader | None: Resumed DataLoader positioned at the correct sample index.
         """
         if dataloader is None or self.state.batch_idx == 0:
             return dataloader
@@ -300,7 +293,6 @@ class Trainer:
 
         sampler = getattr(dataloader, "sampler", None)
 
-        # Case 1: RandomSampler (shuffle=True)
         if (
             self.seed is not None
             and isinstance(sampler, torch.utils.data.RandomSampler)
@@ -316,9 +308,13 @@ class Trainer:
 
             remaining_indices = permutation[start_sample:]
 
-            resumed_loader = DataLoader(dataset, batch_size=batch_size, sampler=torch.utils.data.SubsetRandomSampler(
-                    remaining_indices),
-                num_workers=dataloader.num_workers, pin_memory=dataloader.pin_memory, drop_last=dataloader.drop_last,
+            resumed_loader = DataLoader(
+                dataset,
+                batch_size=batch_size,
+                sampler=torch.utils.data.SubsetRandomSampler(remaining_indices),
+                num_workers=dataloader.num_workers,
+                pin_memory=dataloader.pin_memory,
+                drop_last=dataloader.drop_last,
                 collate_fn=dataloader.collate_fn,
                 persistent_workers=getattr(
                     dataloader,
@@ -328,17 +324,21 @@ class Trainer:
             )
 
             print_once(
-                f"[Trainer] Resuming shuffled dataloader "
-                f"from sample {start_sample}/{len(dataset)}"
+                f"[Trainer] Resuming shuffled dataloader from sample {start_sample}/{len(dataset)}"
             )
 
             return resumed_loader
 
-        # Case 2: Sequential fallback        
-        subset = Subset(dataset,range(start_sample, len(dataset)),)
+        subset = Subset(dataset, range(start_sample, len(dataset)))
 
-        resumed_loader = DataLoader(subset,batch_size=batch_size,shuffle=False,num_workers=dataloader.num_workers,
-            pin_memory=dataloader.pin_memory, drop_last=dataloader.drop_last, collate_fn=dataloader.collate_fn,
+        resumed_loader = DataLoader(
+            subset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=dataloader.num_workers,
+            pin_memory=dataloader.pin_memory,
+            drop_last=dataloader.drop_last,
+            collate_fn=dataloader.collate_fn,
             persistent_workers=getattr(
                 dataloader,
                 "persistent_workers",
@@ -347,13 +347,12 @@ class Trainer:
         )
 
         print_once(
-            "[Trainer] Warning: exact shuffle resumption is not "
-            "available for this DataLoader. Falling back to "
-            "sequential resume."
+            "[Trainer] Warning: exact shuffle resumption is not available for this DataLoader. Falling back to sequential resume."
         )
         return resumed_loader
 
     def fit(self) -> None:
+        """Run full model training loop across configured epochs."""
         if self.train_loader is None:
             raise ValueError("train_dataloader is required to call fit().")
 
@@ -366,10 +365,6 @@ class Trainer:
             self.engine.train_one_epoch(train_loader, epoch)
 
             if self.engine.reached_max_train_steps():
-                # Collective when sharded/FSDP -- every rank must call
-                # save(); CheckpointManager gates the actual disk I/O
-                # internally (and needs every rank for the DCP/full-gather
-                # collective ops either way).
                 self.save("latest")
                 break
 
@@ -383,11 +378,18 @@ class Trainer:
                 self.save("latest")
 
     def validate(self) -> None:
+        """Run validation loop on the validation dataset."""
         if self.val_loader is None:
             raise ValueError("Validation dataloader not provided.")
         self.engine.validate_one_epoch(self.val_loader, self.state.epoch)
 
     def save(self, name: str = "latest", export_jit: bool = False) -> None:
+        """Save checkpoint to disk.
+
+        Args:
+            name (str, default="latest"): Checkpoint name identifier.
+            export_jit (bool, default=False): Export TorchScript model alongside checkpoint.
+        """
         jit_path = None
 
         if export_jit:
@@ -397,9 +399,7 @@ class Trainer:
                     f"{name}_model",
                 )
             except Exception as exc:
-                print_once(
-                    f"[Trainer] TorchScript export skipped: {exc}"
-                )
+                print_once(f"[Trainer] TorchScript export skipped: {exc}")
 
         state = {
             "model": self.model,
@@ -422,15 +422,17 @@ class Trainer:
             "jit_model_path": jit_path,
         }
 
-        # Both paths are collective when the model is sharded (FSDP) --
-        # this must run on every rank. CheckpointManager gates the actual
-        # file writes to the main process internally.
         if self.sharded_checkpoint:
             self.checkpoint_manager.save_sharded(state, name)
         else:
             self.checkpoint_manager.save(state, name)
 
     def load(self, checkpoint: str = "latest") -> None:
+        """Restore trainer model, optimizer, scheduler, and step metadata from checkpoint.
+
+        Args:
+            checkpoint (str, default="latest"): Checkpoint name identifier.
+        """
         state = {
             "model": self.model,
             "optimizer": self.optimizer,
@@ -456,4 +458,4 @@ class Trainer:
 
     def export_torchscript(self, name: str = "inference_model") -> str:
         """Export current model as TorchScript artifact and return path."""
-        return self.checkpoint_manager.save_jit_model(self.model, name=name)
+        return self.checkpoint_manager.save_jit_model(self.model, name=name)

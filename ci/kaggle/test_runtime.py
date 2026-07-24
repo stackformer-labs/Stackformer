@@ -1,3 +1,10 @@
+"""Lightweight CPU and CUDA runtime validation tests for CI environments.
+
+Verifies basic forward, backward gradient computation, and loss finiteness on CPU and GPU.
+"""
+
+from __future__ import annotations
+
 import sys
 import traceback
 
@@ -5,15 +12,27 @@ import torch
 
 
 def _log(msg: str) -> None:
+    """Print formatted CI log line.
+
+    Args:
+        msg (str): Log message string.
+    """
     print(f"[gpu-ci] {msg}", flush=True)
 
 
 def assert_true(condition: bool, message: str) -> None:
+    """Assert boolean condition or raise AssertionError with descriptive message.
+
+    Args:
+        condition (bool): Expression to evaluate.
+        message (str): Assertion failure message.
+    """
     if not condition:
         raise AssertionError(message)
 
 
 def run_cpu_test() -> None:
+    """Run minimal CPU linear model forward/backward pass test."""
     _log("CPU test: tiny linear model forward/backward start")
     device = torch.device("cpu")
     _log(f"CPU test device: {device}")
@@ -37,6 +56,7 @@ def run_cpu_test() -> None:
 
 
 def run_gpu_test() -> None:
+    """Run minimal CUDA GPU linear model forward/backward pass test."""
     _log("GPU test: minimal CUDA forward/backward start")
     assert_true(torch.cuda.is_available(), "CUDA unavailable")
 
@@ -64,6 +84,7 @@ def run_gpu_test() -> None:
 
 
 def main() -> None:
+    """Execute CPU and GPU test functions."""
     _log(f"Python: {sys.version.split()[0]}")
     _log(f"PyTorch: {torch.__version__}")
     _log(f"CUDA available: {torch.cuda.is_available()}")
@@ -88,3 +109,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

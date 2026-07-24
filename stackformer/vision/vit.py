@@ -1,58 +1,135 @@
+"""Vision Transformer (ViT) architecture implementation for image classification.
+
+Implements patch projection tokenization, standard transformer encoder blocks with Pre-Norm,
+learnable absolute positional embeddings, and classification head.
+
+Paper reference:
+    An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale
+    https://arxiv.org/abs/2010.11929
+"""
+
+from __future__ import annotations
+
 import torch
 import torch.nn as nn
 
 from stackformer.modules.Attention import Multi_Head_Attention
 from stackformer.modules.Feed_forward import FF_GELU
 
-"""Vision Transformer (ViT) building blocks.
 
-This file implements a classification-focused Vision Transformer based on the
-paper architecture introduced in 2020.
-
-Paper reference: https://arxiv.org/abs/2010.11929
-"""
-
-# Patch Embedding
 class PatchEmbedding(nn.Module):
-    def __init__(self, img_size=224, patch_size=16, emb_dim=768):
+    """Convolutional patch embedding layer for Vision Transformers.
+
+    Constructor args:
+        img_size (int, default=224): Height and width of input image.
+        patch_size (int, default=16): Height and width of image patches.
+        embed_dim (int, default=768): Dimension of patch projection vectors.
+        in_channels (int, default=3): Number of input image channels.
+
+    Learnable parameters:
+        proj.weight: Shape ``(embed_dim, in_channels, patch_size, patch_size)``. Convolutional kernel.
+        proj.bias: Shape ``(embed_dim,)``. Bias vector.
+
+    Forward args:
+        x (torch.Tensor): Input images tensor of shape ``(B, C, H, W)``.
+
+    Returns:
+        torch.Tensor: Flattened patch tokens of shape ``(B, N, C)`` where N = (H/P) * (W/P).
+
+    Rules:
+        - Image size H and W must be divisible by patch_size.
+
+    Example:
+        >>> patch_embed = PatchEmbedding(img_size=224, patch_size=16, embed_dim=768)
+        >>> x = torch.randn(2, 3, 224, 224)
+        >>> out = patch_embed(x)
+        >>> out.shape
+        torch.Size([2, 196, 768])
+    """
+
+    def __init__(
+        self,
+        img_size: int = 224,
+        patch_size: int = 16,
+        embed_dim: int = 768,
+        in_channels: int = 3,
+        Emb_dim: int | None = None,
+    ) -> None:
         super().__init__()
+        if Emb_dim is not None:
+            embed_dim = Emb_dim
         assert img_size % patch_size == 0, "Image size must be divisible by patch size"
         self.img_size = img_size
         self.patch_size = patch_size
-        self.emb_dim = emb_dim
+        self.embed_dim = embed_dim
+        self.Emb_dim = embed_dim
         self.num_patches = (img_size // patch_size) ** 2
 
-        self.proj = nn.Conv2d(
-            in_channels=3,
-            out_channels=emb_dim,
-            kernel_size=patch_size,
-            stride=patch_size
+        self.projection = nn.Conv2d(
+            in_channels, embed_dim, kernel_size=patch_size, stride=patch_size
         )
 
-    def forward(self, x):
-        # x: [B, 3, H, W]
-        x = self.proj(x)                 # [B, D, H/P, W/P]
-        x = x.flatten(2).transpose(1, 2) # [B, N, D]
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, C, H, W) -> (B, N, C)
+        x = self.projection(x)
+        x = x.flatten(2).transpose(1, 2)
         return x
 
-# Transformer Block
+
 class Block(nn.Module):
-    def __init__(self, Emb_dim, num_heads, dropout, hidden_dim, eps=1e-5, device=None, dtype=torch.float32):
+    """Transformer block combining pre-norm multi-head self-attention and GELU FFN.
+
+    Constructor args:
+        embed_dim (int): Embedding dimension.
+        num_heads (int): Number of attention heads.
+        dropout (float): Dropout probability.
+        hidden_dim (int): Inner hidden dimension of feed-forward layer.
+        eps (float, default=1e-5): LayerNorm epsilon.
+        device (torch.device | str | None, default=None): Target device.
+        dtype (torch.dtype, default=torch.float32): Tensor data type.
+        Emb_dim (int | None, default=None): Deprecated alias for embed_dim.
+
+    Forward args:
+        x (torch.Tensor): Input token embeddings tensor of shape ``(B, N, C)``.
+
+    Returns:
+        torch.Tensor: Transformed token embeddings tensor of shape ``(B, N, C)``.
+
+    Example:
+        >>> block = Block(embed_dim=768, num_heads=12, dropout=0.1, hidden_dim=3072)
+        >>> x = torch.randn(2, 197, 768)
+        >>> out = block(x)
+        >>> out.shape
+        torch.Size([2, 197, 768])
+    """
+
+    def __init__(
+        self,
+        embed_dim: int = 768,
+        num_heads: int = 12,
+        dropout: float = 0.1,
+        hidden_dim: int = 3072,
+        eps: float = 1e-5,
+        device: torch.device | str | None = None,
+        dtype: torch.dtype = torch.float32,
+        Emb_dim: int | None = None,
+    ) -> None:
         super().__init__()
-        # Don't pass device to submodules - let them be moved with .to() later
+        if Emb_dim is not None:
+            embed_dim = Emb_dim
         self.attention = Multi_Head_Attention(
-            embed_dim=Emb_dim,
+            embed_dim=embed_dim,
             num_heads=num_heads,
             dropout=dropout,
             qkv_bias=True,
             device=device,
             dtype=dtype,
         )
-        self.norm1 = nn.LayerNorm(Emb_dim, eps=eps, dtype=dtype)
-        self.ff_gelu = FF_GELU(Emb_dim, hidden_dim, dropout, device=device, dtype=dtype)
-        self.norm2 = nn.LayerNorm(Emb_dim, eps=eps, dtype=dtype)
+        self.norm1 = nn.LayerNorm(embed_dim, eps=eps, dtype=dtype)
+        self.ff_gelu = FF_GELU(embed_dim, hidden_dim, dropout, device=device, dtype=dtype)
+        self.norm2 = nn.LayerNorm(embed_dim, eps=eps, dtype=dtype)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Pre-norm attention
         residual = x
         x = self.norm1(x)
@@ -67,21 +144,61 @@ class Block(nn.Module):
 
         return x
 
-# Encoder (stack of blocks)
+
 class Encoder(nn.Module):
-    def __init__(self, num_layers, Emb_dim, num_heads, dropout, hidden_dim, eps=1e-5, device=None, dtype=torch.float32):
+    """Stack of Vision Transformer encoder blocks.
+
+    Constructor args:
+        num_layers (int): Number of encoder blocks.
+        embed_dim (int): Embedding dimension.
+        num_heads (int): Number of attention heads.
+        dropout (float): Dropout probability.
+        hidden_dim (int): Feed-forward inner hidden dimension.
+        eps (float, default=1e-5): LayerNorm epsilon.
+        device (torch.device | str | None, default=None): Target device.
+        dtype (torch.dtype, default=torch.float32): Tensor data type.
+        Emb_dim (int | None, default=None): Deprecated alias for embed_dim.
+
+    Forward args:
+        x (torch.Tensor): Input token embeddings tensor of shape ``(B, N, C)``.
+
+    Returns:
+        torch.Tensor: Transformed token embeddings tensor of shape ``(B, N, C)``.
+
+    Example:
+        >>> encoder = Encoder(num_layers=12, embed_dim=768, num_heads=12, dropout=0.1, hidden_dim=3072)
+        >>> x = torch.randn(2, 197, 768)
+        >>> out = encoder(x)
+        >>> out.shape
+        torch.Size([2, 197, 768])
+    """
+
+    def __init__(
+        self,
+        num_layers: int = 12,
+        embed_dim: int = 768,
+        num_heads: int = 12,
+        dropout: float = 0.1,
+        hidden_dim: int = 3072,
+        eps: float = 1e-5,
+        device: torch.device | str | None = None,
+        dtype: torch.dtype = torch.float32,
+        Emb_dim: int | None = None,
+    ) -> None:
         super().__init__()
+        if Emb_dim is not None:
+            embed_dim = Emb_dim
         self.layers = nn.ModuleList([
-            Block(Emb_dim, num_heads, dropout, hidden_dim, eps, device=device, dtype=dtype)
+            Block(embed_dim, num_heads, dropout, hidden_dim, eps, device=device, dtype=dtype)
             for _ in range(num_layers)
         ])
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         for layer in self.layers:
             x = layer(x)
         return x
 
-# Vision Transformer (ViT)
+
 class ViT(nn.Module):
     """Vision Transformer for image classification.
 
@@ -120,33 +237,48 @@ class ViT(nn.Module):
         torch.Size([2, 1000])
 
     Args:
-        img_size: Input image height/width (square expected).
-        patch_size: Patch size used for tokenization.
-        num_layers: Number of transformer encoder layers.
-        Emb_dim: Embedding dimension for patch tokens.
-        num_classes: Number of output classes.
-        num_heads: Number of attention heads.
-        dropout: Dropout probability.
-        hidden_dim: Hidden dimension of the feed-forward layer.
-        eps: Epsilon used by layer normalization.
+        img_size (int, default=224): Input image height/width (square expected).
+        patch_size (int, default=16): Patch size used for tokenization.
+        num_layers (int, default=12): Number of transformer encoder layers.
+        embed_dim (int, default=768): Embedding dimension for patch tokens.
+        num_classes (int, default=1000): Number of output classes.
+        num_heads (int, default=12): Number of attention heads.
+        dropout (float, default=0.1): Dropout probability.
+        hidden_dim (int, default=3072): Hidden dimension of the feed-forward layer.
+        eps (float, default=1e-5): Epsilon used by layer normalization.
+        in_channels (int, default=3): Number of input image channels.
+        Emb_dim (int | None, default=None): Deprecated alias for embed_dim.
     """
-    def __init__(self, img_size=224, patch_size=16, num_layers=12,
-                 Emb_dim=768, num_classes=1000, num_heads=12,
-                 dropout=0.1, hidden_dim=3072, eps=1e-5):
-        super().__init__()
-        self.patch_embedding = PatchEmbedding(img_size, patch_size, Emb_dim)
 
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, Emb_dim))
-        self.pos_embed = nn.Parameter(torch.zeros(1, 1 + self.patch_embedding.num_patches, Emb_dim))
+    def __init__(
+        self,
+        img_size: int = 224,
+        patch_size: int = 16,
+        num_layers: int = 12,
+        embed_dim: int = 768,
+        num_classes: int = 1000,
+        num_heads: int = 12,
+        dropout: float = 0.1,
+        hidden_dim: int = 3072,
+        eps: float = 1e-5,
+        in_channels: int = 3,
+        Emb_dim: int | None = None,
+    ) -> None:
+        super().__init__()
+        if Emb_dim is not None:
+            embed_dim = Emb_dim
+        self.patch_embedding = PatchEmbedding(img_size, patch_size, embed_dim, in_channels)
+
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        self.pos_embed = nn.Parameter(torch.zeros(1, 1 + self.patch_embedding.num_patches, embed_dim))
         self.dropout = nn.Dropout(dropout)
 
-        # Encoder - don't pass device here, let .to() handle it
-        self.encoder = Encoder(num_layers, Emb_dim, num_heads, dropout, hidden_dim, eps)
+        self.encoder = Encoder(num_layers, embed_dim, num_heads, dropout, hidden_dim, eps)
 
         # Classification head
         self.mlp_head = nn.Sequential(
-            nn.LayerNorm(Emb_dim, eps=eps),
-            nn.Linear(Emb_dim, num_classes)
+            nn.LayerNorm(embed_dim, eps=eps),
+            nn.Linear(embed_dim, num_classes),
         )
 
         # Init weights
@@ -154,7 +286,8 @@ class ViT(nn.Module):
         nn.init.trunc_normal_(self.cls_token, std=0.02)
         nn.init.trunc_normal_(self.pos_embed, std=0.02)
 
-    def _init_weights(self, m):
+    def _init_weights(self, m: nn.Module) -> None:
+        """Initialize linear, conv, and layernorm layer weights."""
         if isinstance(m, nn.Linear):
             nn.init.trunc_normal_(m.weight, std=0.02)
             if m.bias is not None:
@@ -167,16 +300,17 @@ class ViT(nn.Module):
             nn.init.ones_(m.weight)
             nn.init.zeros_(m.bias)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         B = x.size(0)
-        x = self.patch_embedding(x)   # [B, N, D]
+        x = self.patch_embedding(x)  # (B, N, C)
 
-        cls_tokens = self.cls_token.expand(B, -1, -1)
-        pos_embed = self.pos_embed
+        cls_tokens = self.cls_token.expand(B, -1, -1)  # (B, 1, C)
+        pos_embed = self.pos_embed  # (1, 1+N, C)
 
-        x = torch.cat((cls_tokens, x), dim=1)   # [B, 1+N, D]
+        x = torch.cat((cls_tokens, x), dim=1)  # (B, 1+N, C)
         x = x + pos_embed
         x = self.dropout(x)
 
-        x = self.encoder(x)
-        return self.mlp_head(x[:, 0])   # [B, num_classes]
+        x = self.encoder(x)  # (B, 1+N, C)
+        return self.mlp_head(x[:, 0])  # (B, num_classes)
+

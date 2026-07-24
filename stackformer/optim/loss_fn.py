@@ -1,17 +1,14 @@
-"""Loss function helpers for Transformer-family training.
+"""Loss function helpers for Transformer, Vision, and Segmentation models.
 
-The project uses cross-entropy as the default objective for language modeling,
-but researchers often need additional losses for multitask, contrastive,
-classification, and segmentation workloads.
+Provides cross-entropy, binary cross-entropy, segmentation loss, and KL divergence distillation losses.
 """
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Any, Callable
 
 import torch
 import torch.nn.functional as F
-
 
 Tensor = torch.Tensor
 
@@ -22,16 +19,16 @@ def language_modeling_cross_entropy(
     ignore_index: int = -100,
     label_smoothing: float = 0.0,
 ) -> Tensor:
-    """Compute autoregressive token cross-entropy loss.
+    """Compute autoregressive token cross-entropy loss for language models.
 
     Args:
-        logits: Tensor of shape ``[B, T, V]``.
-        labels: Tensor of shape ``[B, T]``.
-        ignore_index: Label id to skip.
-        label_smoothing: Smoothing factor in ``[0, 1)``.
+        logits (Tensor): Predicted token logits of shape `(B, T, V)`.
+        labels (Tensor): Ground truth target token IDs of shape `(B, T)`.
+        ignore_index (int, default=-100): Target token ID to ignore in loss calculation.
+        label_smoothing (float, default=0.0): Label smoothing epsilon in `[0, 1)`.
 
     Returns:
-        Scalar loss tensor.
+        Tensor: Scalar cross-entropy loss.
     """
     if logits.ndim != 3:
         raise ValueError("Expected logits shape [B, T, V] for language modeling.")
@@ -51,18 +48,29 @@ def classification_cross_entropy(
     labels: Tensor,
     label_smoothing: float = 0.0,
 ) -> Tensor:
-    """Compute cross-entropy loss for classifier heads.
+    """Compute multi-class cross-entropy loss for classification heads.
 
     Args:
-        logits: Tensor of shape ``[B, C]``.
-        labels: Tensor of shape ``[B]``.
-        label_smoothing: Smoothing factor.
+        logits (Tensor): Class logits of shape `(B, C)`.
+        labels (Tensor): Target class indices of shape `(B,)`.
+        label_smoothing (float, default=0.0): Label smoothing coefficient.
+
+    Returns:
+        Tensor: Scalar classification loss.
     """
     return F.cross_entropy(logits, labels, label_smoothing=label_smoothing)
 
 
 def binary_classification_bce_with_logits(logits: Tensor, labels: Tensor) -> Tensor:
-    """Compute BCE-with-logits for binary/multi-label tasks."""
+    """Compute binary cross-entropy loss with logits for binary or multi-label classification.
+
+    Args:
+        logits (Tensor): Unnormalized logit predictions tensor.
+        labels (Tensor): Target binary values tensor.
+
+    Returns:
+        Tensor: Scalar BCE loss.
+    """
     return F.binary_cross_entropy_with_logits(logits, labels.float())
 
 
@@ -71,12 +79,15 @@ def segmentation_cross_entropy(
     labels: Tensor,
     ignore_index: int = 255,
 ) -> Tensor:
-    """Compute segmentation cross-entropy.
+    """Compute 2D spatial cross-entropy loss for image segmentation tasks.
 
     Args:
-        logits: Tensor ``[B, C, H, W]``.
-        labels: Tensor ``[B, H, W]``.
-        ignore_index: Masked class id.
+        logits (Tensor): Predicted class logits of shape `(B, C, H, W)`.
+        labels (Tensor): Target class mask of shape `(B, H, W)`.
+        ignore_index (int, default=255): Masked label index to ignore.
+
+    Returns:
+        Tensor: Scalar segmentation loss.
     """
     return F.cross_entropy(logits, labels.long(), ignore_index=ignore_index)
 
@@ -86,26 +97,33 @@ def kl_divergence_distillation(
     teacher_logits: Tensor,
     temperature: float = 1.0,
 ) -> Tensor:
-    """KL divergence distillation loss.
+    """Compute Kullback-Leibler (KL) divergence distillation loss between student and teacher models.
 
-    Useful for student/teacher Transformer training.
+    Args:
+        student_logits (Tensor): Logit predictions from student model.
+        teacher_logits (Tensor): Logit predictions from teacher model.
+        temperature (float, default=1.0): Softmax temperature scaling factor (> 0).
+
+    Returns:
+        Tensor: Scalar KL divergence distillation loss.
     """
     if temperature <= 0:
         raise ValueError("temperature must be > 0")
 
     s = F.log_softmax(student_logits / temperature, dim=-1)
     t = F.softmax(teacher_logits / temperature, dim=-1)
-    return F.kl_div(s, t, reduction="batchmean") * (temperature ** 2)
+    return F.kl_div(s, t, reduction="batchmean") * (temperature**2)
 
 
-def get_loss_fn(name: str, **kwargs) -> Callable[[Tensor, Tensor], Tensor]:
-    """Factory for common loss functions.
+def get_loss_fn(name: str, **kwargs: Any) -> Callable[[Tensor, Tensor], Tensor]:
+    """Factory for selecting loss function callables by string name.
 
-    Supported names:
-        - ``lm_cross_entropy``
-        - ``classification_cross_entropy``
-        - ``bce_with_logits``
-        - ``segmentation_cross_entropy``
+    Args:
+        name (str): Loss function identifier name.
+        **kwargs (Any): Additional keyword arguments passed to loss function.
+
+    Returns:
+        Callable[[Tensor, Tensor], Tensor]: Loss calculation callable.
     """
     key = name.lower()
 
@@ -119,3 +137,4 @@ def get_loss_fn(name: str, **kwargs) -> Callable[[Tensor, Tensor], Tensor]:
         return lambda logits, labels: segmentation_cross_entropy(logits, labels, **kwargs)
 
     raise ValueError(f"Unsupported loss function: {name}")
+

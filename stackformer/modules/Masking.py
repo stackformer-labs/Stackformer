@@ -1,122 +1,100 @@
-"""
-masks.py
---------
+"""Attention mask creation utilities for dense and sparse Transformer layouts.
 
-Attention mask utilities for dense and sparse transformer layouts.
+Follows PyTorch Scaled Dot Product Attention (SDPA) boolean mask conventions:
+    - True: position is visible (unmasked)
+    - False: position is masked out (-inf added to attention logits)
 
-All masks follow the PyTorch SDPA boolean convention:
-
-    True  -> visible (token takes part in attention)
-    False -> masked  (token is ignored, -inf added to logit)
-
-Returned shape:
-    (seq_len, seq_len)   —  row = query index, col = key index
-
-This module supports composing multiple masking strategies using
-a registry-based factory pattern with configurable composition operators.
+Mask dimensions:
+    Shape ``(seq_len, seq_len)`` where row=query index, col=key index.
 """
 
-from typing import Callable, Dict, List, Literal
-import torch
+from __future__ import annotations
+
 import inspect
+from typing import Callable, Dict, List, Literal
+
+import torch
 
 # Base Mask Functions
-def causal(seq_len: int, device=None) -> torch.Tensor:
-    """
-    Standard autoregressive causal mask.
 
-    Each token attends to itself and all previous tokens.
-    Future tokens are masked.
+
+def causal(seq_len: int, device: torch.device | str | None = None) -> torch.Tensor:
+    """Standard autoregressive causal attention mask.
 
     Args:
-        seq_len (int): Sequence length.
+        seq_len (int): Sequence length ``T``.
+        device (torch.device | str | None, default=None): Compute device.
 
     Returns:
-        torch.Tensor: (seq_len, seq_len) boolean mask.
-            True  = visible (lower triangle, diagonal included)
-            False = masked  (upper triangle, future tokens)
+        torch.Tensor: Boolean lower-triangular mask tensor of shape ``(seq_len, seq_len)``.
     """
-    return torch.tril(
-        torch.ones(seq_len, seq_len, dtype=torch.bool, device=device)
-    )
+    return torch.tril(torch.ones(seq_len, seq_len, dtype=torch.bool, device=device))
 
 
-def sliding_window(seq_len: int, window_size: int, device=None) -> torch.Tensor:
-    """
-    Sliding window causal attention.
-
-    Each token attends to itself and the previous ``window_size - 1``
-    tokens. Tokens further in the past and all future tokens are masked.
+def sliding_window(
+    seq_len: int, window_size: int, device: torch.device | str | None = None
+) -> torch.Tensor:
+    """Sliding window causal attention mask.
 
     Args:
-        seq_len (int)
-        window_size (int): Number of positions each token can see,
-            including itself.  E.g. window_size=3 → self + 2 past.
+        seq_len (int): Sequence length ``T``.
+        window_size (int): Size of local attention window.
+        device (torch.device | str | None, default=None): Compute device.
 
     Returns:
-        torch.Tensor: (seq_len, seq_len) boolean mask.
-            True  = visible
-            False = masked
+        torch.Tensor: Boolean sliding window mask tensor of shape ``(seq_len, seq_len)``.
     """
     if window_size <= 0:
         raise ValueError("window_size must be > 0")
-    
-    i = torch.arange(seq_len, device=device).unsqueeze(1)   # (seq_len, 1) — query index
-    j = torch.arange(seq_len, device=device).unsqueeze(0)   # (1, seq_len) — key index
 
-    in_past   = j <= i                        # key is not a future token
-    in_window = (i - j) < window_size         # key is within the window
-    
+    i = torch.arange(seq_len, device=device).unsqueeze(1)  # (T, 1)
+    j = torch.arange(seq_len, device=device).unsqueeze(0)  # (1, T)
+
+    in_past = j <= i
+    in_window = (i - j) < window_size
+
     return in_past & in_window
 
 
-def dilated_causal(seq_len: int, dilation: int, device=None) -> torch.Tensor:
-    """
-    Dilated causal attention.
-
-    Each token attends only to past positions that are exact multiples
-    of ``dilation`` steps away, including itself (distance 0).
-    All other positions are masked.
+def dilated_causal(
+    seq_len: int, dilation: int, device: torch.device | str | None = None
+) -> torch.Tensor:
+    """Dilated causal attention mask.
 
     Args:
-        seq_len (int)
-        dilation (int)
+        seq_len (int): Sequence length ``T``.
+        dilation (int): Dilation stride factor.
+        device (torch.device | str | None, default=None): Compute device.
 
     Returns:
-        torch.Tensor: (seq_len, seq_len) boolean mask.
-            True  = visible
-            False = masked
+        torch.Tensor: Boolean dilated mask tensor of shape ``(seq_len, seq_len)``.
     """
     if dilation <= 0:
         raise ValueError("dilation must be > 0")
- 
+
     i = torch.arange(seq_len, device=device).unsqueeze(1)
     j = torch.arange(seq_len, device=device).unsqueeze(0)
 
-    in_past   = j <= i
+    in_past = j <= i
     on_stride = (i - j) % dilation == 0
     return in_past & on_stride
 
 
-def random_mask(seq_len: int, num_random: int, device=None) -> torch.Tensor:
-    """
-    Random sparse causal attention.
-
-    Each token attends to ``num_random`` randomly-chosen positions from
-    its causal past (including itself). All other positions are masked.
+def random_mask(
+    seq_len: int, num_random: int, device: torch.device | str | None = None
+) -> torch.Tensor:
+    """Random sparse causal attention mask.
 
     Args:
-        seq_len (int)
-        num_random (int)
+        seq_len (int): Sequence length ``T``.
+        num_random (int): Number of random past positions to attend to.
+        device (torch.device | str | None, default=None): Compute device.
 
     Returns:
-        torch.Tensor: (seq_len, seq_len) boolean mask.
-            True  = visible
-            False = masked
+        torch.Tensor: Boolean random sparse mask tensor of shape ``(seq_len, seq_len)``.
     """
     if num_random < 0 or num_random > seq_len:
         raise ValueError("num_random must be between 0 and seq_len")
-    # Start fully masked; selectively open chosen past positions.
     cols = (
         torch.rand(seq_len, seq_len, device=device)
         .tril()
@@ -129,162 +107,105 @@ def random_mask(seq_len: int, num_random: int, device=None) -> torch.Tensor:
     return mask
 
 
-def global_mask(seq_len: int, global_index: List[int], device=None) -> torch.Tensor:
-    """
-    Global attention mask.
-
-    Selected global tokens attend to every other token, and every other
-    token attends back to the global tokens.
-    All remaining pairs are masked.
+def global_mask(
+    seq_len: int, global_index: List[int], device: torch.device | str | None = None
+) -> torch.Tensor:
+    """Global attention mask.
 
     Args:
-        seq_len (int)
-        global_index (List[int]): Token indices with global visibility.
+        seq_len (int): Sequence length ``T``.
+        global_index (List[int]): Indices of tokens with global visibility.
+        device (torch.device | str | None, default=None): Compute device.
 
     Returns:
-        torch.Tensor: (seq_len, seq_len) boolean mask.
-            True  = visible
-            False = masked
+        torch.Tensor: Boolean global attention mask tensor of shape ``(seq_len, seq_len)``.
     """
     if any(i < 0 or i >= seq_len for i in global_index):
         raise ValueError("global_index contains invalid token indices")
-    # Start fully masked; open global rows and columns.
     mask = torch.zeros(seq_len, seq_len, dtype=torch.bool, device=device)
-    g    = torch.tensor(global_index, device=device)
+    g = torch.tensor(global_index, device=device)
 
-    mask[g, :] = True   # global tokens → can attend to everyone
-    mask[:, g] = True   # everyone      → can attend to global tokens
+    mask[g, :] = True
+    mask[:, g] = True
 
     return mask
 
 
-def no_mask(seq_len: int, device=None) -> torch.Tensor:
-    """
-    Full bidirectional attention — every position is visible.
+def no_mask(seq_len: int, device: torch.device | str | None = None) -> torch.Tensor:
+    """Full unmasked bidirectional attention mask.
 
     Args:
-        seq_len (int)
+        seq_len (int): Sequence length ``T``.
+        device (torch.device | str | None, default=None): Compute device.
 
     Returns:
-        torch.Tensor: (seq_len, seq_len) boolean mask, all True.
+        torch.Tensor: Boolean all-True mask tensor of shape ``(seq_len, seq_len)``.
     """
     return torch.ones(seq_len, seq_len, dtype=torch.bool, device=device)
 
 
-def mistral(seq_len: int, window_size: int, dilation: int, device=None) -> torch.Tensor:
-    """
-    Mistral-style hybrid mask: sliding window + dilated attention.
-
-    A position is visible if it falls inside the sliding window OR on
-    the dilated stride. Positions outside both are masked.
+def mistral(
+    seq_len: int, window_size: int, dilation: int, device: torch.device | str | None = None
+) -> torch.Tensor:
+    """Mistral-style hybrid sliding window + dilated attention mask.
 
     Args:
-        seq_len (int)
-        window_size (int)
-        dilation (int)
+        seq_len (int): Sequence length ``T``.
+        window_size (int): Local window size.
+        dilation (int): Dilation stride.
+        device (torch.device | str | None, default=None): Compute device.
 
     Returns:
-        torch.Tensor: (seq_len, seq_len) boolean mask.
-            True  = visible
-            False = masked
+        torch.Tensor: Hybrid boolean mask tensor of shape ``(seq_len, seq_len)``.
     """
-    return (sliding_window(seq_len, window_size, device=device)| dilated_causal(seq_len, dilation, device=device))
+    return sliding_window(seq_len, window_size, device=device) | dilated_causal(
+        seq_len, dilation, device=device
+    )
+
 
 # Registry
 MASK_REGISTRY: Dict[str, Callable] = {
-    "no":             no_mask,
-    "causal":         causal,
+    "no": no_mask,
+    "causal": causal,
     "sliding_window": sliding_window,
     "dilated_causal": dilated_causal,
-    "random_mask":    random_mask,
-    "global_mask":    global_mask,
-    "mistral":        mistral,
+    "random_mask": random_mask,
+    "global_mask": global_mask,
+    "mistral": mistral,
 }
 
-# Unified Factory
 
 def make_mask(
-    mask_types: List[str],
+    mask_types: list[str] | tuple[str, ...] | str | None,
     seq_len: int,
-    device: torch.device | None = None,
+    device: torch.device | str | None = None,
     combine: Literal["or", "and"] = "or",
     **kwargs,
 ) -> torch.Tensor:
-    """
-    Unified mask factory.
-
-    Combines multiple mask patterns into a single boolean mask using
-    the True = visible / False = masked convention.
+    """Construct a composite boolean attention mask from specified mask strategy names.
 
     Args:
-        mask_types (List[str]):
-            Mask names to combine. See ``MASK_REGISTRY`` for available keys.
-
-        seq_len (int):
-            Sequence length.
-
-        device (torch.device, optional):
-            Target device for the returned tensor.
-
-        combine (Literal["or", "and"]):
-            How to merge individual masks.
-
-            ``"or"``  — a position is visible if ANY sub-mask marks it
-                        visible (union of visible sets; less restrictive).
-                        Identity: all-False.  Accumulates with ``|``.
-
-            ``"and"`` — a position is visible only if ALL sub-masks mark
-                        it visible (intersection; more restrictive).
-                        Identity: all-True.  Accumulates with ``&``.
-
-            Default: ``"or"``.
-
-        **kwargs:
-            Extra parameters forwarded to mask functions by name::
-
-                window_size  (int)       — sliding_window, mistral
-                dilation     (int)       — dilated_causal, mistral
-                num_random   (int)       — random_mask
-                global_index (List[int]) — global_mask
+        mask_types (list[str] | tuple[str, ...] | str | None): List, tuple, string, or None of mask names.
+        seq_len (int): Sequence length ``T``.
+        device (torch.device | str | None, default=None): Target compute device.
+        combine (Literal["or", "and"], default="or"): Operator to combine multiple masks.
+        **kwargs: Additional parameters passed to mask builder functions (e.g. `window_size`, `dilation`).
 
     Returns:
-        torch.Tensor:
-            Boolean mask of shape ``(seq_len, seq_len)``.
-            True = visible, False = masked.
-
-    Raises:
-        TypeError:  if ``mask_types`` is not a list or tuple.
-        ValueError: if an unknown mask name is given, or ``combine`` is
-                    not ``"or"`` or ``"and"``.
-
-    Examples::
-
-        # Causal OR global — visible if causal past OR is a global token
-        mask = make_mask(
-            ["causal", "global_mask"],
-            seq_len=16,
-            global_index=[0],
-            combine="or",
-        )
-
-        # Sliding window AND dilated — must be visible in both to attend
-        mask = make_mask(
-            ["sliding_window", "dilated_causal"],
-            seq_len=32,
-            window_size=4,
-            dilation=2,
-            combine="and",
-        )
+        torch.Tensor: Composite boolean mask tensor of shape ``(seq_len, seq_len)``.
     """
+    if mask_types is None:
+        return no_mask(seq_len, device=device)
+
+    if isinstance(mask_types, str):
+        mask_types = [mask_types]
+
     if not isinstance(mask_types, (list, tuple)):
-        raise TypeError("mask_types must be a list of strings")
+        raise TypeError("mask_types must be a list, tuple, or string of mask name(s)")
 
     if combine not in ("or", "and"):
         raise ValueError(f"combine must be 'or' or 'and', got {combine!r}")
 
-    # Identity element:
-    #   OR  → all-False (nothing visible yet); grow with |
-    #   AND → all-True  (everything visible); restrict with &
     init_val = combine == "and"
     mask = torch.full(
         (seq_len, seq_len),
@@ -296,17 +217,12 @@ def make_mask(
     for name in mask_types:
         if name not in MASK_REGISTRY:
             raise ValueError(
-                f"Unknown mask '{name}'. "
-                f"Available: {list(MASK_REGISTRY.keys())}"
+                f"Unknown mask '{name}'. Available: {list(MASK_REGISTRY.keys())}"
             )
-            
-        fn  = MASK_REGISTRY[name]
+
+        fn = MASK_REGISTRY[name]
         sig = inspect.signature(fn)
-        call_kwargs = {
-            k: v
-            for k, v in kwargs.items()
-            if k in sig.parameters
-        }
+        call_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
 
         partial = fn(seq_len, device=device, **call_kwargs)
 
@@ -315,4 +231,4 @@ def make_mask(
         else:
             mask &= partial
 
-    return mask
+    return mask

@@ -1,6 +1,4 @@
-"""stackformer/modules/layer.py
-
-Transformer building blocks — from a single block to a full encoder/decoder stack.
+"""Transformer building blocks — from a single block to a full encoder/decoder stack.
 
 Design principles:
   - One config object (BlockConfig) drives everything — no repeated keyword walls.
@@ -8,20 +6,17 @@ Design principles:
   - EncoderBlock / DecoderBlock own their wiring; stacks own their depth.
   - TransformerBlock is kept for backward compatibility.
 
-Typical usage::
-
-    from stackformer.modules.layer import BlockConfig, TransformerEncoder, TransformerDecoder
-
-    cfg = BlockConfig(embed_dim=512, num_heads=8, ffn="swiglu", attention="gqa", num_kv_heads=2)
-
-    encoder = TransformerEncoder(cfg, num_layers=6, pos_embedding="sinusoidal")
-    decoder = TransformerDecoder(cfg, num_layers=6)
-
-    memory = encoder(src)           # (B, S, C)
-    out    = decoder(tgt, memory)   # (B, T, C)
+Typical usage:
+    >>> from stackformer.modules.layer import BlockConfig, TransformerEncoder, TransformerDecoder
+    >>> cfg = BlockConfig(embed_dim=512, num_heads=8, ffn="swiglu", attention="gqa", num_kv_heads=2)
+    >>> encoder = TransformerEncoder(cfg, num_layers=6, pos_embedding="sinusoidal")
+    >>> decoder = TransformerDecoder(cfg, num_layers=6)
+    >>> memory = encoder(src)           # (B, S, C)
+    >>> out    = decoder(tgt, memory)   # (B, T, C)
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -39,103 +34,81 @@ from stackformer.modules.Attention import (
     Self_Attention,
 )
 from stackformer.modules.Feed_forward import (
-    FF_GELU, FF_GeGLU, FF_LeakyReLU,
-    FF_ReLU, FF_Sigmoid, FF_SiLU, FF_SwiGLU,
+    FF_GELU,
+    FF_GeGLU,
+    FF_LeakyReLU,
+    FF_ReLU,
+    FF_Sigmoid,
+    FF_SiLU,
+    FF_SwiGLU,
 )
 from stackformer.modules.Normalization import (
-    LayerNormalization, RMSNormalization,
+    LayerNormalization,
+    RMSNormalization,
 )
 from stackformer.modules.position_embedding import (
     AbsolutePositionEmbedding,
     SinusoidalPositionalEmbedding,
 )
 
-# Config
+
 @dataclass
 class BlockConfig:
-    """All hyperparameters that describe one transformer block.
-
-    Pass a single ``BlockConfig`` to any block or stack class instead of
-    a wall of keyword arguments.  Every field has a sensible default so
-    you only need to specify what differs from the baseline.
+    """Hyperparameter configuration dataclass describing a single transformer block.
 
     Args:
-        embed_dim:    Model width ``C``.  Required.
-        num_heads:    Number of query heads ``H``.  Required.
-        hidden_dim:   FFN inner dimension.  Defaults to ``4 * embed_dim``.
-        attention:    Self-attention variant.  One of:
-                      ``'mha'``, ``'mha_rope'``,
-                      ``'mqa'``, ``'mqa_rope'``,
-                      ``'gqa'``, ``'gqa_rope'``,
-                      ``'self'``.
-        num_kv_heads: KV heads for GQA variants.  Defaults to ``num_heads``
-                      (equivalent to standard MHA).
-        ffn:          Feed-forward activation.  One of:
-                      ``'relu'``, ``'leakyrelu'``, ``'gelu'``,
-                      ``'sigmoid'``, ``'silu'``, ``'swiglu'``, ``'geglu'``.
-        norm:         Normalization layer.  One of:
-                      ``'layernorm'``, ``'rmsnorm'``.
-        dropout:      Dropout probability applied inside attention and FFN.
-        pre_norm:     ``True``  → Pre-LN (norm before sub-layer, stable).
-                      ``False`` → Post-LN (norm after residual, original paper).
-        mask_type:    List of mask pattern names forwarded to each attention
-                      module (e.g. ``['causal']``, ``['sliding_window']``).
-        qkv_bias:     Whether Q/K/V projection layers have bias terms.
-        eps:          Numerical stability epsilon forwarded to the
-                      normalization layer (LayerNorm / RMSNorm).
-        device:       Compute and parameter device.
-        dtype:        Parameter dtype.
-
-    Examples::
-
-        # Minimal — sensible defaults for everything else
-        cfg = BlockConfig(embed_dim=512, num_heads=8)
-
-        # Modern LLM style
-        cfg = BlockConfig(
-            embed_dim=4096,
-            num_heads=32,
-            ffn="swiglu",
-            attention="gqa",
-            num_kv_heads=8,
-            norm="rmsnorm",
-        )
-
-        # Small debug config
-        cfg = BlockConfig(embed_dim=64, num_heads=4, hidden_dim=128, dropout=0.1)
-
-        # Custom norm epsilon (e.g. matching the original 2017 paper)
-        cfg = BlockConfig(embed_dim=512, num_heads=8, norm="layernorm", eps=1e-5)
+        embed_dim (int): Model embedding dimension size ``C``.
+        num_heads (int): Number of query attention heads ``H``.
+        hidden_dim (int, default=0): FFN inner dimension (0 defaults to 4 * embed_dim).
+        attention (str, default="mha"): Self-attention variant ("mha", "mha_rope", "mqa", "mqa_rope", "gqa", "gqa_rope", "self").
+        num_kv_heads (int | None, default=None): Key/Value heads for GQA variants (defaults to num_heads).
+        ffn (str, default="swiglu"): Feed-forward activation type ("relu", "leakyrelu", "gelu", "sigmoid", "silu", "swiglu", "geglu").
+        norm (str, default="rmsnorm"): Normalization layer type ("layernorm", "rmsnorm").
+        dropout (float, default=0.0): Dropout probability in attention and FFN blocks.
+        pre_norm (bool, default=True): If True, use Pre-LN; if False, use Post-LN.
+        mask_type (list, default=["causal"]): List of mask pattern names.
+        qkv_bias (bool, default=True): Enable bias in Q/K/V linear projections.
+        eps (float, default=1e-5): Epsilon for normalization layers.
+        device (torch.device | str, default="cpu"): Target compute device.
+        dtype (torch.dtype, default=torch.float32): Tensor data type.
     """
 
-    embed_dim:    int
-    num_heads:    int
-    hidden_dim:   int = 0            # 0 → auto: 4 × embed_dim
+    embed_dim: int
+    num_heads: int
+    hidden_dim: int = 0
 
-    attention:    Literal[
-        "mha", "mha_rope",
-        "mqa", "mqa_rope",
-        "gqa", "gqa_rope",
+    attention: Literal[
+        "mha",
+        "mha_rope",
+        "mqa",
+        "mqa_rope",
+        "gqa",
+        "gqa_rope",
         "self",
     ] = "mha"
-    num_kv_heads: int | None = None  # None → same as num_heads
+    num_kv_heads: int | None = None
 
     ffn: Literal[
-        "relu", "leakyrelu", "gelu",
-        "sigmoid", "silu", "swiglu", "geglu",
+        "relu",
+        "leakyrelu",
+        "gelu",
+        "sigmoid",
+        "silu",
+        "swiglu",
+        "geglu",
     ] = "swiglu"
-    norm:    Literal["layernorm", "rmsnorm"] = "rmsnorm"
+    norm: Literal["layernorm", "rmsnorm"] = "rmsnorm"
 
-    dropout:  float = 0.0
-    pre_norm: bool  = True
+    dropout: float = 0.0
+    pre_norm: bool = True
 
     mask_type: list = field(default_factory=lambda: ["causal"])
-    qkv_bias:  bool = True
+    qkv_bias: bool = True
 
     eps: float = 1e-5
 
-    device: str            = "cpu"
-    dtype:  torch.dtype    = torch.float32
+    device: str = "cpu"
+    dtype: torch.dtype = torch.float32
 
     def __post_init__(self) -> None:
         if self.hidden_dim == 0:
@@ -146,8 +119,7 @@ class BlockConfig:
 
         if self.embed_dim % self.num_heads != 0:
             raise ValueError(
-                f"embed_dim ({self.embed_dim}) must be divisible by "
-                f"num_heads ({self.num_heads})"
+                f"embed_dim ({self.embed_dim}) must be divisible by " f"num_heads ({self.num_heads})"
             )
 
         if "gqa" in self.attention and self.num_heads % self.num_kv_heads != 0:
@@ -157,38 +129,39 @@ class BlockConfig:
             )
 
 
-# Private factories  (one concern each — easy to extend)
+# Private factories
 def _build_attention(cfg: BlockConfig) -> nn.Module:
-    """Return the self-attention module described by *cfg*."""
+    """Return the self-attention module described by cfg."""
     shared = dict(
-        dropout   = cfg.dropout,
-        mask_type = cfg.mask_type,
-        qkv_bias  = cfg.qkv_bias,
-        device    = cfg.device,
-        dtype     = cfg.dtype,
+        dropout=cfg.dropout,
+        mask_type=cfg.mask_type,
+        qkv_bias=cfg.qkv_bias,
+        device=cfg.device,
+        dtype=cfg.dtype,
     )
-    E, H, G = cfg.embed_dim, cfg.num_heads, cfg.num_kv_heads
-    
+    embed_dim, num_heads, num_kv_heads = cfg.embed_dim, cfg.num_heads, cfg.num_kv_heads
+
     key = cfg.attention.lower()
     if key == "self":
-        return Self_Attention(E, **shared)
+        return Self_Attention(embed_dim, **shared)
     elif key == "mha":
-        return Multi_Head_Attention(E, H, **shared)
+        return Multi_Head_Attention(embed_dim, num_heads, **shared)
     elif key == "mha_rope":
-        return Multi_Head_Attention_With_RoPE(E, H, **shared)
+        return Multi_Head_Attention_With_RoPE(embed_dim, num_heads, **shared)
     elif key == "mqa":
-        return Multi_query_Attention(E, H, **shared)
+        return Multi_query_Attention(embed_dim, num_heads, **shared)
     elif key == "mqa_rope":
-        return Multi_query_Attention_With_RoPE(E, H, **shared)
+        return Multi_query_Attention_With_RoPE(embed_dim, num_heads, **shared)
     elif key == "gqa":
-        return Group_query_Attention(E, H, G, **shared)
+        return Group_query_Attention(embed_dim, num_heads, num_kv_heads, **shared)
     elif key == "gqa_rope":
-        return Group_query_Attention_With_RoPE(E, H, G, **shared)
+        return Group_query_Attention_With_RoPE(embed_dim, num_heads, num_kv_heads, **shared)
     else:
         raise ValueError(
             f"Unknown attention '{cfg.attention}'. "
             f"Available: ['mha', 'mha_rope', 'mqa', 'mqa_rope', 'gqa', 'gqa_rope', 'self']"
         )
+
         
 def _build_cross_attention(cfg: BlockConfig) -> nn.Module:
     """Return a cross-attention module (queries from target, K/V from memory)."""
@@ -273,281 +246,280 @@ def _build_pos_embedding(
 
 # Blocks
 class EncoderBlock(nn.Module):
-    """One transformer encoder layer: self-attention + FFN.
+    """One transformer encoder layer containing self-attention and FFN sub-layers.
 
-    Wiring (pre-norm)::
+    Wiring (pre-norm):
+        x -> norm1 -> self_attn -> + -> norm2 -> ffn -> + -> output
+        |__________________________| |__________________|
 
-        x → norm1 → self_attn ─┐
-        └──────────────────────⊕ → norm2 → ffn ─┐
-                                └────────────────⊕ → output
+    Wiring (post-norm):
+        x -> self_attn -> + -> norm1 -> ffn -> + -> norm2 -> output
+        |_________________| |__________________|
 
-    Wiring (post-norm)::
-
-        x → self_attn ─┐
-        └──────────────⊕ → norm1 → ffn ─┐
-                                         ⊕ → norm2 → output
-
-    Args:
-        cfg: :class:`BlockConfig` that specifies all sub-modules.
+    Constructor args:
+        cfg (BlockConfig): Block configuration dataclass.
 
     Forward args:
-        x:    ``(B, T, C)`` input tensor.
-        mask: Whether to apply the configured attention mask.
-              Default ``False`` — encoders typically use bidirectional attention.
+        x (torch.Tensor): Input sequence tensor of shape ``(B, T, C)``.
+        mask (bool, default=False): Apply attention mask (default False for encoder).
 
     Returns:
-        ``(B, T, C)``
+        torch.Tensor: Encoder block output tensor of shape ``(B, T, C)``.
 
-    Example::
-
-        cfg   = BlockConfig(embed_dim=512, num_heads=8, ffn="swiglu")
-        block = EncoderBlock(cfg)
-        y     = block(torch.randn(2, 64, 512))
+    Example:
+        >>> cfg = BlockConfig(embed_dim=512, num_heads=8, ffn="swiglu")
+        >>> block = EncoderBlock(cfg)
+        >>> y = block(torch.randn(2, 64, 512))
+        >>> y.shape
+        torch.Size([2, 64, 512])
     """
+
 
     def __init__(self, cfg: BlockConfig) -> None:
         super().__init__()
-        self.pre_norm  = cfg.pre_norm
+        self.pre_norm = cfg.pre_norm
         self.self_attn = _build_attention(cfg)
-        self.ffn       = _build_ffn(cfg)
-        self.norm1     = _build_norm(cfg)
-        self.norm2     = _build_norm(cfg)
+        self.ffn = _build_ffn(cfg)
+        self.norm1 = _build_norm(cfg)
+        self.norm2 = _build_norm(cfg)
 
     def forward(self, x: torch.Tensor, mask: bool = False) -> torch.Tensor:
+        # x: (B, T, C)
         if self.pre_norm:
             x = x + self.self_attn(self.norm1(x), mask=mask)
             x = x + self.ffn(self.norm2(x))
-        else:   # post-norm
+        else:  # post-norm
             x = self.norm1(x + self.self_attn(x, mask=mask))
             x = self.norm2(x + self.ffn(x))
-        return x
+        return x  # (B, T, C)
 
 
 class DecoderBlock(nn.Module):
-    """One transformer decoder layer: causal self-attn + cross-attn + FFN.
+    """One transformer decoder layer containing self-attention, cross-attention, and FFN sub-layers.
 
-    Wiring (pre-norm)::
+    Wiring (pre-norm):
+        x -> norm1 -> self_attn (causal) -> + -> norm2 -> cross_attn(memory) -> + -> norm3 -> ffn -> + -> output
+        |________________________________| |_________________________________| |_______________|
 
-        x → norm1 → self_attn (causal) ─┐
-        └────────────────────────────────⊕
-          → norm2 → cross_attn(memory) ──┐
-          └────────────────────────────── ⊕
-            → norm3 → ffn ───────────────┐
-            └────────────────────────────⊕ → output
-
-    The cross-attention always uses standard MHA (queries from *x*,
-    keys/values from *memory*). The self-attention variant is taken from
-    *cfg.attention* — so you can use GQA self-attention in the decoder.
-
-    Args:
-        cfg: :class:`BlockConfig` that specifies all sub-modules.
+    Constructor args:
+        cfg (BlockConfig): Block configuration dataclass.
 
     Forward args:
-        x:               ``(B, T, C)`` target sequence.
-        memory:          ``(B, S, C)`` encoder output.
-        self_mask:       Apply causal mask on self-attention.  Default ``True``.
-        cross_mask:      Apply mask on cross-attention.  Default ``False``.
-        cross_attn_mask: Optional explicit ``(T, S)`` boolean mask for
-                         cross-attention (overrides ``cross_mask``).
+        x (torch.Tensor): Target sequence input tensor of shape ``(B, T, C)``.
+        memory (torch.Tensor): Encoder memory sequence tensor of shape ``(B, S, C)``.
+        self_mask (bool, default=True): Apply causal mask to self-attention.
+        cross_mask (bool, default=False): Apply mask to cross-attention.
+        cross_attn_mask (torch.Tensor | None, default=None): Explicit cross-attention mask tensor.
 
     Returns:
-        ``(B, T, C)``
+        torch.Tensor: Decoder block output tensor of shape ``(B, T, C)``.
 
-    Example::
-
-        cfg   = BlockConfig(embed_dim=512, num_heads=8)
-        block = DecoderBlock(cfg)
-        y     = block(tgt, memory)
+    Example:
+        >>> cfg = BlockConfig(embed_dim=512, num_heads=8)
+        >>> block = DecoderBlock(cfg)
+        >>> tgt, memory = torch.randn(2, 30, 512), torch.randn(2, 40, 512)
+        >>> y = block(tgt, memory)
+        >>> y.shape
+        torch.Size([2, 30, 512])
     """
 
     def __init__(self, cfg: BlockConfig) -> None:
         super().__init__()
-        self.pre_norm   = cfg.pre_norm
-        self.self_attn  = _build_attention(cfg)
+        self.pre_norm = cfg.pre_norm
+        self.self_attn = _build_attention(cfg)
         self.cross_attn = _build_cross_attention(cfg)
-        self.ffn        = _build_ffn(cfg)
-        self.norm1      = _build_norm(cfg)
-        self.norm2      = _build_norm(cfg)
-        self.norm3      = _build_norm(cfg)
+        self.ffn = _build_ffn(cfg)
+        self.norm1 = _build_norm(cfg)
+        self.norm2 = _build_norm(cfg)
+        self.norm3 = _build_norm(cfg)
 
     def forward(
         self,
         x: torch.Tensor,
         memory: torch.Tensor,
-        self_mask:       bool                  = True,
-        cross_mask:      bool                  = False,
-        cross_attn_mask: torch.Tensor | None   = None,
+        self_mask: bool = True,
+        cross_mask: bool = False,
+        cross_attn_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        # x: (B, T, C), memory: (B, S, C)
         if self.pre_norm:
             x = x + self.self_attn(self.norm1(x), mask=self_mask)
-            x = x + self.cross_attn(self.norm2(x), memory,
-                                    mask=cross_mask, attn_mask=cross_attn_mask)
+            x = x + self.cross_attn(
+                self.norm2(x), memory, mask=cross_mask, attn_mask=cross_attn_mask
+            )
             x = x + self.ffn(self.norm3(x))
-        else:   # post-norm
+        else:  # post-norm
             x = self.norm1(x + self.self_attn(x, mask=self_mask))
-            x = self.norm2(x + self.cross_attn(x, memory,
-                                                mask=cross_mask, attn_mask=cross_attn_mask))
+            x = self.norm2(
+                x + self.cross_attn(x, memory, mask=cross_mask, attn_mask=cross_attn_mask)
+            )
             x = self.norm3(x + self.ffn(x))
-        return x
+        return x  # (B, T, C)
 
-# Stacks
+
 class TransformerEncoder(nn.Module):
-    """A stack of :class:`EncoderBlock` layers.
+    """A stacked sequence of EncoderBlock layers.
 
-    Args:
-        cfg:           :class:`BlockConfig` shared by every block.
-        num_layers:    Number of encoder blocks to stack.
-        pos_embedding: Optional positional embedding added before the first
-                       block.  One of ``'sinusoidal'``, ``'absolute'``, or
-                       ``None``.  Pass ``None`` when using ``*_rope``
-                       attention (RoPE is handled inside each block).
-        max_seq_len:   Maximum sequence length for learnable/sinusoidal PE.
-                       Ignored when ``pos_embedding=None``.
+    Constructor args:
+        cfg (BlockConfig): Shared block configuration.
+        num_layers (int): Number of encoder layers to stack.
+        pos_embedding (str | None, default=None): Positional embedding type ("sinusoidal", "absolute", or None).
+        max_seq_len (int, default=4096): Maximum sequence length for positional embeddings.
 
     Forward args:
-        x:    ``(B, T, C)`` already-embedded token tensor.
-        mask: Forwarded to every block.  Default ``False``.
+        x (torch.Tensor): Token embedding input tensor of shape ``(B, T, C)``.
+        mask (bool, default=False): Masking flag forwarded to each block.
 
     Returns:
-        ``(B, T, C)``
+        torch.Tensor: Encoder stack output representations tensor of shape ``(B, T, C)``.
 
-    Example::
-
-        cfg     = BlockConfig(embed_dim=512, num_heads=8, ffn="swiglu", attention="gqa", num_kv_heads=2)
-        encoder = TransformerEncoder(cfg, num_layers=6, pos_embedding="sinusoidal")
-        memory  = encoder(src_embeds)
+    Example:
+        >>> cfg = BlockConfig(embed_dim=512, num_heads=8, ffn="swiglu", attention="gqa", num_kv_heads=2)
+        >>> encoder = TransformerEncoder(cfg, num_layers=6, pos_embedding="sinusoidal")
+        >>> memory = encoder(torch.randn(2, 64, 512))
+        >>> memory.shape
+        torch.Size([2, 64, 512])
     """
 
     def __init__(
         self,
-        cfg:           BlockConfig,
-        num_layers:    int,
+        cfg: BlockConfig,
+        num_layers: int,
         pos_embedding: str | None = None,
-        max_seq_len:   int        = 4096,
+        max_seq_len: int = 4096,
     ) -> None:
         super().__init__()
         self.pos_embedding = _build_pos_embedding(pos_embedding, max_seq_len, cfg)
-        self.layers        = nn.ModuleList([EncoderBlock(cfg) for _ in range(num_layers)])
-        # Pre-LN models need a final norm; post-LN already has one in each block.
-        self.final_norm    = _build_norm(cfg) if cfg.pre_norm else nn.Identity()
+        self.layers = nn.ModuleList([EncoderBlock(cfg) for _ in range(num_layers)])
+        self.final_norm = _build_norm(cfg) if cfg.pre_norm else nn.Identity()
 
     def forward(self, x: torch.Tensor, mask: bool = False) -> torch.Tensor:
+        # x: (B, T, C)
         if self.pos_embedding is not None:
             x = x + self.pos_embedding(x)
         for layer in self.layers:
             x = layer(x, mask=mask)
-        return self.final_norm(x)
+        return self.final_norm(x)  # (B, T, C)
 
 
 class TransformerDecoder(nn.Module):
-    """A stack of :class:`DecoderBlock` layers.
+    """A stacked sequence of DecoderBlock layers.
 
-    Args:
-        cfg:           :class:`BlockConfig` shared by every block.
-        num_layers:    Number of decoder blocks to stack.
-        pos_embedding: Optional positional embedding.  Same rules as
-                       :class:`TransformerEncoder`.
-        max_seq_len:   Maximum sequence length for PE.
+    Constructor args:
+        cfg (BlockConfig): Shared block configuration.
+        num_layers (int): Number of decoder layers to stack.
+        pos_embedding (str | None, default=None): Positional embedding type ("sinusoidal", "absolute", or None).
+        max_seq_len (int, default=4096): Maximum sequence length for positional embeddings.
 
     Forward args:
-        x:               ``(B, T, C)`` target embeddings.
-        memory:          ``(B, S, C)`` encoder output.
-        self_mask:       Causal mask on self-attention.  Default ``True``.
-        cross_mask:      Mask on cross-attention.  Default ``False``.
-        cross_attn_mask: Optional explicit ``(T, S)`` mask.
+        x (torch.Tensor): Target token embedding tensor of shape ``(B, T, C)``.
+        memory (torch.Tensor): Encoder output memory tensor of shape ``(B, S, C)``.
+        self_mask (bool, default=True): Causal self-attention mask flag.
+        cross_mask (bool, default=False): Cross-attention mask flag.
+        cross_attn_mask (torch.Tensor | None, default=None): Explicit cross-attention mask tensor.
 
     Returns:
-        ``(B, T, C)``
+        torch.Tensor: Decoder stack output tensor of shape ``(B, T, C)``.
 
-    Example::
-
-        cfg     = BlockConfig(embed_dim=512, num_heads=8)
-        decoder = TransformerDecoder(cfg, num_layers=6)
-        out     = decoder(tgt_embeds, memory)
+    Example:
+        >>> cfg = BlockConfig(embed_dim=512, num_heads=8)
+        >>> decoder = TransformerDecoder(cfg, num_layers=6)
+        >>> out = decoder(torch.randn(2, 30, 512), torch.randn(2, 40, 512))
+        >>> out.shape
+        torch.Size([2, 30, 512])
     """
 
     def __init__(
         self,
-        cfg:           BlockConfig,
-        num_layers:    int,
+        cfg: BlockConfig,
+        num_layers: int,
         pos_embedding: str | None = None,
-        max_seq_len:   int        = 4096,
+        max_seq_len: int = 4096,
     ) -> None:
         super().__init__()
         self.pos_embedding = _build_pos_embedding(pos_embedding, max_seq_len, cfg)
-        self.layers        = nn.ModuleList([DecoderBlock(cfg) for _ in range(num_layers)])
-        self.final_norm    = _build_norm(cfg) if cfg.pre_norm else nn.Identity()
+        self.layers = nn.ModuleList([DecoderBlock(cfg) for _ in range(num_layers)])
+        self.final_norm = _build_norm(cfg) if cfg.pre_norm else nn.Identity()
 
     def forward(
         self,
-        x:               torch.Tensor,
-        memory:          torch.Tensor,
-        self_mask:       bool                = True,
-        cross_mask:      bool                = False,
+        x: torch.Tensor,
+        memory: torch.Tensor,
+        self_mask: bool = True,
+        cross_mask: bool = False,
         cross_attn_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        # x: (B, T, C), memory: (B, S, C)
         if self.pos_embedding is not None:
             x = x + self.pos_embedding(x)
         for layer in self.layers:
             x = layer(
-                x, memory,
+                x,
+                memory,
                 self_mask=self_mask,
                 cross_mask=cross_mask,
                 cross_attn_mask=cross_attn_mask,
             )
-        return self.final_norm(x)
+        return self.final_norm(x)  # (B, T, C)
 
-# Backward-compatible TransformerBlock
+
 class TransformerBlock(nn.Module):
-    """Single encoder block — kept for backward compatibility.
+    """Single encoder block alias (retained for backward compatibility).
 
-    Prefer :class:`EncoderBlock` for new code.  This class accepts the same
-    keyword arguments as the original ``TransformerBlock`` and delegates to
-    :class:`EncoderBlock` internally.
+    Constructor args:
+        embed_dim (int): Model embedding dimension size ``C``.
+        num_heads (int): Number of attention heads ``H``.
+        hidden_dim (int): FFN inner dimension size ``M``.
+        attention (str, default="mha"): Self-attention type.
+        num_kv_heads (int | None, default=None): Key/Value heads for GQA.
+        ffn (str, default="relu"): FFN activation type.
+        norm (str, default="layernorm"): Normalization layer type.
+        dropout (float, default=0.0): Dropout probability.
+        pre_norm (bool, default=True): Use Pre-LN if True, Post-LN if False.
+        eps (float, default=1e-5): Epsilon for normalization.
+        device (torch.device | str, default="cpu"): Target device.
+        dtype (torch.dtype, default=torch.float32): Tensor data type.
 
-    Example (old API still works)::
+    Forward args:
+        x (torch.Tensor): Input sequence tensor of shape ``(B, T, C)``.
+        mask (bool, default=True): Apply causal mask.
 
-        block = TransformerBlock(embed_dim=256, num_heads=4, hidden_dim=1024)
-        y = block(x)
-
-    Example (new API via BlockConfig)::
-
-        cfg   = BlockConfig(embed_dim=256, num_heads=4)
-        block = EncoderBlock(cfg)
-        y     = block(x)
+    Returns:
+        torch.Tensor: Output tensor of shape ``(B, T, C)``.
     """
 
     def __init__(
         self,
-        embed_dim:    int,
-        num_heads:    int,
-        hidden_dim:   int,
-        attention:    str          = "mha",
-        num_kv_heads: int | None   = None,
-        ffn:          str          = "relu",
-        norm:         str          = "layernorm",
-        dropout:      float        = 0.0,
-        pre_norm:     bool         = True,
-        eps:          float        = 1e-5,
-        device:       str          = "cpu",
-        dtype:        torch.dtype  = torch.float32,
+        embed_dim: int,
+        num_heads: int,
+        hidden_dim: int,
+        attention: str = "mha",
+        num_kv_heads: int | None = None,
+        ffn: str = "relu",
+        norm: str = "layernorm",
+        dropout: float = 0.0,
+        pre_norm: bool = True,
+        eps: float = 1e-5,
+        device: torch.device | str = "cpu",
+        dtype: torch.dtype = torch.float32,
     ) -> None:
         super().__init__()
         cfg = BlockConfig(
-            embed_dim    = embed_dim,
-            num_heads    = num_heads,
-            hidden_dim   = hidden_dim,
-            attention    = attention,
-            num_kv_heads = num_kv_heads,
-            ffn          = ffn,
-            norm         = norm,
-            dropout      = dropout,
-            pre_norm     = pre_norm,
-            eps          = eps,
-            device       = device,
-            dtype        = dtype,
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            hidden_dim=hidden_dim,
+            attention=attention,
+            num_kv_heads=num_kv_heads,
+            ffn=ffn,
+            norm=norm,
+            dropout=dropout,
+            pre_norm=pre_norm,
+            eps=eps,
+            device=device,
+            dtype=dtype,
         )
         self._block = EncoderBlock(cfg)
 
     def forward(self, x: torch.Tensor, mask: bool = True) -> torch.Tensor:
-        return self._block(x, mask=mask)
+        # x: (B, T, C)
+        return self._block(x, mask=mask)

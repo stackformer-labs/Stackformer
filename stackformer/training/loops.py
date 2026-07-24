@@ -1,6 +1,11 @@
-"""Reusable training/evaluation loop helpers."""
+"""Reusable training, evaluation, and prediction loop execution primitives.
+
+Provides `train_epoch`, `eval_epoch`, and `predict_loop` functions.
+"""
 
 from __future__ import annotations
+
+from typing import Any, List
 
 import torch
 from tqdm import tqdm
@@ -8,7 +13,14 @@ from tqdm import tqdm
 from stackformer.utils.utils import is_main_process
 
 
-def train_epoch(engine, dataloader, epoch: int) -> None:
+def train_epoch(engine: Any, dataloader: Any, epoch: int) -> None:
+    """Execute a single training epoch loop over the given dataloader.
+
+    Args:
+        engine (Any): Engine instance executing steps and tracking state.
+        dataloader (Any): PyTorch DataLoader providing training batches.
+        epoch (int): Current epoch number index.
+    """
     if dataloader is None:
         raise ValueError("train dataloader must not be None")
 
@@ -38,7 +50,14 @@ def train_epoch(engine, dataloader, epoch: int) -> None:
             iterator.set_postfix(display_metrics)
 
 
-def eval_epoch(engine, dataloader, epoch: int) -> None:
+def eval_epoch(engine: Any, dataloader: Any, epoch: int) -> None:
+    """Execute a non-optimizing evaluation epoch loop over the given dataloader.
+
+    Args:
+        engine (Any): Engine instance executing validation steps.
+        dataloader (Any): PyTorch DataLoader providing validation batches.
+        epoch (int): Current epoch number index.
+    """
     if dataloader is None:
         raise ValueError("validation dataloader must not be None")
 
@@ -60,7 +79,16 @@ def eval_epoch(engine, dataloader, epoch: int) -> None:
                 iterator.set_postfix({"val_loss": f"{metrics['val_loss']:.4f}"})
 
 
-def predict_loop(engine, dataloader):
+def predict_loop(engine: Any, dataloader: Any) -> List[Any]:
+    """Execute forward passes in eval mode over a dataloader and accumulate raw model outputs.
+
+    Args:
+        engine (Any): Engine instance providing model and device placement.
+        dataloader (Any): DataLoader providing prediction inputs.
+
+    Returns:
+        List[Any]: List of raw model predictions for each batch.
+    """
     outputs = []
     engine.state.model.eval()
     with torch.no_grad():
@@ -73,3 +101,4 @@ def predict_loop(engine, dataloader):
 # Backwards compatibility aliases
 train_loop = train_epoch
 validation_loop = eval_epoch
+

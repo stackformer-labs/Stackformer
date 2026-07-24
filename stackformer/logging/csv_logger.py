@@ -1,4 +1,7 @@
-"""CSV logger backend."""
+"""CSV logger backend for saving training metrics to disk.
+
+Provides `CSVLogger` class to append step metrics to a structured CSV file.
+"""
 
 from __future__ import annotations
 
@@ -10,14 +13,14 @@ from stackformer.utils.utils import is_main_process
 
 
 class CSVLogger:
-    """Write scalar metrics to CSV.
+    """Writes numeric scalar training metrics to a CSV file on disk.
 
-    Args:
-        log_dir: Output log directory.
-        filename: CSV filename.
+    Constructor args:
+        log_dir (str, default="logs"): Output directory path for log files.
+        filename (str, default="metrics.csv"): Target CSV filename.
     """
 
-    def __init__(self, log_dir: str = "logs", filename: str = "metrics.csv"):
+    def __init__(self, log_dir: str = "logs", filename: str = "metrics.csv") -> None:
         self.enabled = is_main_process()
         self.file = None
         self.writer = None
@@ -31,6 +34,11 @@ class CSVLogger:
         self.file = open(self.path, mode="a", newline="", encoding="utf-8")
 
     def log(self, metrics: Dict[str, float]) -> None:
+        """Write key-value metrics row to CSV file.
+
+        Args:
+            metrics (Dict[str, float]): Key-value pair metric dictionary.
+        """
         if not self.enabled or not metrics:
             return
         if self.file is None:
@@ -47,17 +55,20 @@ class CSVLogger:
         self.writer.writerow(clean)
 
     def flush(self) -> None:
+        """Flush unwritten CSV buffers to disk."""
         if self.enabled and self.file:
             self.file.flush()
 
     def close(self) -> None:
+        """Flush and close active CSV file handle."""
         if self.enabled and self.file:
             self.file.flush()
             self.file.close()
             self.file = None
 
-    def __del__(self):
+    def __del__(self) -> None:
         try:
             self.close()
         except Exception:
             pass
+

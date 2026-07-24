@@ -1,3 +1,9 @@
+"""Autoregressive text generation utilities for StackFormer language models.
+
+Provides sequence generation via temperature, top-k, and top-p (nucleus) sampling with
+optional KV-cache acceleration for models implementing `prefill` and `decode` interfaces.
+"""
+
 from __future__ import annotations
 
 import torch
@@ -12,7 +18,17 @@ def _sample_next_token(
     top_k: int | None,
     top_p: float,
 ) -> torch.Tensor:
-    """Sample the next token using temperature, top-k, and nucleus (top-p) sampling."""
+    """Sample the next token ID from logit probabilities.
+
+    Args:
+        logits (torch.Tensor): Logits tensor of shape ``(B, V)`` for the current position.
+        temperature (float): Temperature parameter > 0.
+        top_k (int | None): Top-k filtering threshold.
+        top_p (float): Nucleus top-p cumulative probability threshold.
+
+    Returns:
+        torch.Tensor: Sampled token IDs of shape ``(B, 1)``.
+    """
     if temperature <= 0:
         raise ValueError("temperature must be > 0")
 
@@ -61,7 +77,20 @@ def _resolve_generation_config(
     eos_token_id: int | None,
     generation_config: GenerationConfig | None,
 ) -> GenerationConfig:
-    """Create or return a GenerationConfig."""
+    """Create or resolve a GenerationConfig instance.
+
+    Args:
+        max_context_len (int): Context window length.
+        max_new_tokens (int): Max tokens to generate.
+        temperature (float): Temperature parameter.
+        top_k (int | None): Top-k threshold.
+        top_p (float): Top-p threshold.
+        eos_token_id (int | None): EOS token ID.
+        generation_config (GenerationConfig | None): Optional existing configuration.
+
+    Returns:
+        GenerationConfig: Resolved configuration object.
+    """
     if generation_config is None:
         return GenerationConfig(
             max_context_len=max_context_len,
@@ -86,19 +115,36 @@ def text_generate(
     eos_token_id: int | None = None,
     generation_config: GenerationConfig | None = None,
 ) -> torch.Tensor:
+    """Autoregressively generate tokens from a language model.
+
+    Supports standard feed-forward and fast KV-cache accelerated models.
+    KV-cache models expose `supports_kv_cache = True` and implement
+    `prefill(input_ids)` and `decode(next_token, cache)`.
+
+    Args:
+        model (torch.nn.Module): Language model instance.
+        prompt_ids (torch.Tensor): Prompt token IDs of shape ``(B, T)`` or ``(T,)``.
+        max_context_len (int, default=128): Maximum context length window.
+        max_new_tokens (int, default=50): Number of tokens to generate.
+        temperature (float, default=1.0): Temperature for sampling.
+        top_k (int | None, default=None): Top-k filtering limit.
+        top_p (float, default=1.0): Top-p nucleus filtering limit.
+        eos_token_id (int | None, default=None): Optional EOS token ID to halt generation.
+        generation_config (GenerationConfig | None, default=None): Optional generation config override.
+
+    Returns:
+        torch.Tensor: Generated token IDs tensor of shape ``(B, T + num_generated)``.
+
+    Raises:
+        RuntimeError: If `supports_kv_cache=True` but `prefill()` or `decode()` are missing.
+
+    Example:
+        >>> model = GPT_1(vocab_size=1000, embed_dim=128, num_layers=2, num_heads=4, seq_len=64)
+        >>> prompt = torch.randint(0, 1000, (1, 10))
+        >>> out = text_generate(model, prompt, max_new_tokens=5)
+        >>> out.shape
+        torch.Size([1, 15])
     """
-    Autoregressively generate tokens from a model.
-
-    Models supporting KV-cache should expose:
-
-        supports_kv_cache = True
-
-    and implement
-
-        prefill(input_ids)
-        decode(next_token, cache)
-    """
-
     config = _resolve_generation_config(
         max_context_len=max_context_len,
         max_new_tokens=max_new_tokens,
@@ -110,7 +156,7 @@ def text_generate(
     )
 
     if prompt_ids.dim() == 1:
-        prompt_ids = prompt_ids.unsqueeze(0)
+        prompt_ids = prompt_ids.unsqueeze(0)  # (T,) -> (1, T)
 
     generated = prompt_ids.clone()
 
@@ -140,23 +186,14 @@ def text_generate(
     use_cache = has_cache_methods and explicit_flag is not False
 
     if use_cache:
-        if not (
-            callable(getattr(model, "prefill", None))
-            and callable(getattr(model, "decode", None))
-        ):
-            raise RuntimeError(
-                "supports_kv_cache=True requires both "
-                "'prefill()' and 'decode()' methods."
-            )
-
         input_ids = generated[:, -config.max_context_len :]
         logits, cache = model.prefill(input_ids)
-        logits = logits[:, -1, :]
+        logits = logits[:, -1, :]  # (B, T, V) -> (B, V)
 
     else:
         input_ids = generated[:, -config.max_context_len :]
         logits = model(input_ids)
-        logits = logits[:, -1, :]
+        logits = logits[:, -1, :]  # (B, T, V) -> (B, V)
 
     for _ in range(config.max_new_tokens):
 
@@ -165,7 +202,7 @@ def text_generate(
             config.temperature,
             config.top_k,
             config.top_p,
-        )
+        )  # (B, 1)
 
         if config.eos_token_id is not None:
             eos_hits = next_token.squeeze(-1) == config.eos_token_id
@@ -178,18 +215,18 @@ def text_generate(
                 next_token,
             )
 
-        generated = torch.cat((generated, next_token), dim=-1)
+        generated = torch.cat((generated, next_token), dim=-1)  # (B, T_curr) -> (B, T_curr + 1)
 
         if finished.all():
             break
 
         if use_cache:
             logits, cache = model.decode(next_token, cache)
-            logits = logits[:, -1, :]
+            logits = logits[:, -1, :]  # (B, 1, V) -> (B, V)
 
         else:
             input_ids = generated[:, -config.max_context_len :]
             logits = model(input_ids)
-            logits = logits[:, -1, :]
+            logits = logits[:, -1, :]  # (B, T_ctx, V) -> (B, V)
 
-    return generated
+    return generated

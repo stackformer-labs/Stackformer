@@ -1,42 +1,56 @@
-"""DistributedDataParallel helpers."""
+"""DistributedDataParallel (DDP) initialization and process group management helpers.
+
+Provides functions for process group setup, rank queries, DDP model wrapping, and DistributedSampler construction.
+"""
 
 from __future__ import annotations
 
 import os
+from typing import Any
 
 import torch
+import torch.nn as nn
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 
 def get_local_rank() -> int:
+    """Return local GPU process rank from `LOCAL_RANK` environment variable."""
     return int(os.environ.get("LOCAL_RANK", "0"))
 
 
 def get_rank() -> int:
+    """Return global process rank in distributed process group (defaults to 0 if not initialized)."""
     if not dist.is_available() or not dist.is_initialized():
         return 0
     return dist.get_rank()
 
 
 def get_world_size() -> int:
+    """Return total number of processes in distributed process group (defaults to 1 if not initialized)."""
     if not dist.is_available() or not dist.is_initialized():
         return 1
     return dist.get_world_size()
 
 
 def is_distributed() -> bool:
+    """Check whether torch.distributed is initialized and active."""
     return dist.is_available() and dist.is_initialized()
 
 
 def is_main_process() -> bool:
+    """Check whether the current process is global rank 0 main process."""
     return get_rank() == 0
 
 
 def init_distributed(backend: str | None = None) -> bool:
-    """Initialize ``torch.distributed`` when WORLD_SIZE > 1.
+    """Initialize `torch.distributed` process group if environment WORLD_SIZE > 1.
 
-    Returns True when the process group is active.
+    Args:
+        backend (str | None, default=None): Distributed backend ("nccl" for GPU, "gloo" for CPU).
+
+    Returns:
+        bool: True if process group is initialized and active, False otherwise.
     """
     if not dist.is_available() or dist.is_initialized():
         return is_distributed()
@@ -57,7 +71,15 @@ def init_distributed(backend: str | None = None) -> bool:
     return True
 
 
-def wrap_model_ddp(model: torch.nn.Module) -> torch.nn.Module:
+def wrap_model_ddp(model: nn.Module) -> nn.Module:
+    """Wrap a PyTorch model with DistributedDataParallel if running in a distributed environment.
+
+    Args:
+        model (nn.Module): Model instance to wrap.
+
+    Returns:
+        nn.Module: DDP-wrapped model instance, or original model if not distributed.
+    """
     if not is_distributed():
         return model
 
@@ -68,7 +90,16 @@ def wrap_model_ddp(model: torch.nn.Module) -> torch.nn.Module:
     return DDP(model)
 
 
-def distributed_sampler(dataset, shuffle: bool = True):
+def distributed_sampler(dataset: Any, shuffle: bool = True) -> Any | None:
+    """Construct a PyTorch `DistributedSampler` for multi-GPU data loading.
+
+    Args:
+        dataset (Any): Target dataset instance.
+        shuffle (bool, default=True): Enable random index shuffling per epoch.
+
+    Returns:
+        Any | None: DistributedSampler instance if distributed, else None.
+    """
     if not is_distributed():
         return None
     from torch.utils.data.distributed import DistributedSampler
@@ -77,18 +108,23 @@ def distributed_sampler(dataset, shuffle: bool = True):
 
 
 def barrier() -> None:
+    """Synchronize all processes in the distributed process group using a barrier."""
     if is_distributed():
         dist.barrier()
 
 
 def cleanup_distributed() -> None:
+    """Destroy active PyTorch distributed process group."""
     if is_distributed():
         dist.destroy_process_group()
 
 
 def cleanup() -> None:
+    """Alias for cleanup_distributed()."""
     cleanup_distributed()
 
 
 def setup_ddp(backend: str | None = None) -> bool:
+    """Alias for init_distributed(backend)."""
     return init_distributed(backend=backend)
+

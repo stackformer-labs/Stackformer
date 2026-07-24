@@ -1,26 +1,49 @@
-"""Runtime step execution for training and evaluation."""
+"""Runtime step execution engine for training and evaluation.
+
+Executes forward/backward optimization steps, gradient accumulation, AMP scaling, and metric tracking.
+"""
 
 from __future__ import annotations
 
 from contextlib import nullcontext
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
 
-from stackformer.logging.metrics import MetricTracker
 from stackformer.amp import step_optimizer, update_scaler
+from stackformer.logging.metrics import MetricTracker
 from stackformer.training.loops import eval_epoch, train_epoch
-from stackformer.utils.utils import is_main_process
 from stackformer.utils.device import move_to_device
+from stackformer.utils.utils import is_main_process
 
 
 class Engine:
-    """Executes train/eval steps with robust batch and loss handling."""
+    """Executes training and evaluation steps with robust batch handling and gradient accumulation.
+
+    Simple explanation:
+        The `Engine` wraps a `TrainingState` and handles the mechanics of running forward
+        passes, computing loss, backpropagating gradients, scaling for AMP, stepping optimizers/schedulers,
+        and tracking training metrics.
+
+    Constructor args:
+        state (TrainingState): Active training state container instance.
+        grad_accum_steps (int, default=1): Number of micro-batches to accumulate before optimizer step.
+        max_grad_norm (float | None, default=None): Threshold for gradient clipping.
+        monitor (Any | None, default=None): Optional logger/monitor for live metric streaming.
+        log_every (int, default=10): Metric logging interval (in steps).
+        max_train_steps (int | None, default=None): Maximum global step cap for training termination.
+        batch_parser (Callable | None, default=None): Custom batch unpacking function.
+        compute_loss_fn (Callable | None, default=None): Custom loss calculation function.
+
+    Example:
+        >>> engine = Engine(state=training_state, grad_accum_steps=2)
+        >>> metrics = engine._train_step(batch)
+    """
 
     def __init__(
         self,
-        state,
+        state: Any,
         grad_accum_steps: int = 1,
         max_grad_norm: Optional[float] = None,
         monitor: Optional[Any] = None,
@@ -28,7 +51,7 @@ class Engine:
         max_train_steps: Optional[int] = None,
         batch_parser: Optional[Callable[[Any], Tuple[Any, Any]]] = None,
         compute_loss_fn: Optional[Callable[[Any, Any, Any], torch.Tensor]] = None,
-    ):
+    ) -> None:
         self.state = state
         self.grad_accum_steps = max(1, int(grad_accum_steps))
         self.max_grad_norm = max_grad_norm
@@ -44,14 +67,34 @@ class Engine:
         if self.state.model is not None:
             self.state.model.to(self.state.device)
 
-    def train_one_epoch(self, dataloader, epoch: int) -> None:
+    def train_one_epoch(self, dataloader: Any, epoch: int) -> None:
+        """Run a full training epoch across the provided dataloader.
+
+        Args:
+            dataloader (Any): Training data loader iteration provider.
+            epoch (int): Current epoch index.
+        """
         self.metrics.reset()
         train_epoch(self, dataloader, epoch)
 
-    def validate_one_epoch(self, dataloader, epoch: int) -> None:
+    def validate_one_epoch(self, dataloader: Any, epoch: int) -> None:
+        """Run evaluation loop across validation dataloader.
+
+        Args:
+            dataloader (Any): Validation data loader iteration provider.
+            epoch (int): Current epoch index.
+        """
         eval_epoch(self, dataloader, epoch)
 
-    def _train_step(self, batch) -> dict:
+    def _train_step(self, batch: Any) -> Dict[str, Any]:
+        """Execute a single training step (forward, loss calculation, backward, accumulation step).
+
+        Args:
+            batch (Any): Input batch tuple or dictionary.
+
+        Returns:
+            Dict[str, Any]: Step metric dictionary.
+        """
         state = self.state
         if state.optimizer is None:
             raise ValueError("Optimizer is required for training steps.")
@@ -106,7 +149,15 @@ class Engine:
             self._log_step(metrics)
         return metrics
 
-    def _eval_step(self, batch) -> dict:
+    def _eval_step(self, batch: Any) -> Dict[str, Any]:
+        """Execute a single non-optimizing evaluation step.
+
+        Args:
+            batch (Any): Input evaluation batch tuple or dictionary.
+
+        Returns:
+            Dict[str, Any]: Metric dictionary containing validation loss.
+        """
         inputs, targets = self._prepare_batch(batch)
         scaler = self.state.scaler
 
@@ -149,7 +200,6 @@ class Engine:
         if self.monitor is None or not is_main_process():
             return
 
-        # ensure consistent keys
         stable_metrics = dict(metrics)
 
         EXPECTED_KEYS = [
@@ -168,17 +218,19 @@ class Engine:
         self.monitor.log(stable_metrics)
 
     def get_lr(self) -> Optional[float]:
+        """Return current learning rate from optimizer."""
         opt = self.state.optimizer
         if opt is None:
             return None
         return float(opt.param_groups[0]["lr"])
 
     def reached_max_train_steps(self) -> bool:
+        """Check if global step limit has been reached."""
         if self.max_train_steps is None:
             return False
         return self.state.global_step >= int(self.max_train_steps)
 
-    def _prepare_batch(self, batch):
+    def _prepare_batch(self, batch: Any) -> Tuple[Any, Any]:
         if self.batch_parser is not None:
             inputs, targets = self.batch_parser(batch)
             return move_to_device(inputs, self.state.device), move_to_device(targets, self.state.device)
@@ -198,12 +250,12 @@ class Engine:
 
         raise ValueError("Unsupported batch format. Use (inputs, targets) or dict with labels/targets.")
 
-    def _forward_model(self, inputs):
+    def _forward_model(self, inputs: Any) -> Any:
         if isinstance(inputs, dict):
             return self.state.model(**inputs)
         return self.state.model(inputs)
 
-    def _compute_loss(self, outputs, targets) -> torch.Tensor:
+    def _compute_loss(self, outputs: Any, targets: Any) -> torch.Tensor:
         if self.compute_loss_fn is not None:
             return self.compute_loss_fn(outputs, targets, self.state)
 
@@ -211,24 +263,12 @@ class Engine:
             return outputs.loss
 
         if isinstance(outputs, (list, tuple)) and outputs:
-            # A model may compute and return its own loss as the first tuple
-            # element (common when losses are gathered/accumulated and come
-            # back as a single-element tensor rather than a strict 0-dim
-            # scalar, e.g. `loss.view(1)`). Accept any single-element tensor
-            # here, not just `ndim == 0`, so we don't misidentify it as
-            # logits and demand a criterion that isn't needed.
             if torch.is_tensor(outputs[0]) and outputs[0].numel() == 1:
                 return outputs[0].squeeze()
             outputs = outputs[0]
 
         criterion = self.state.config.get("criterion")
         if criterion is None:
-            # No explicit criterion configured: fall back to a sensible
-            # default based on output/target shape and dtype, rather than
-            # forcing every caller to wire up a criterion for the common
-            # cases. Classification: integer class-index targets paired
-            # with one extra output dim (logits) -> cross-entropy.
-            # Regression: matching shapes -> MSE.
             if torch.is_tensor(outputs) and torch.is_tensor(targets):
                 if (
                     targets.dtype in (torch.int64, torch.long)
@@ -247,7 +287,7 @@ class Engine:
             return criterion(outputs.view(-1, outputs.size(-1)), targets.view(-1), ignore_index=-100)
 
     @staticmethod
-    def _get_autocast_context(scaler):
+    def _get_autocast_context(scaler: Any) -> Any:
         if scaler and getattr(scaler, "is_enabled", False) and hasattr(scaler, "autocast"):
             return scaler.autocast()
-        return nullcontext()
+        return nullcontext()

@@ -1,11 +1,16 @@
-"""Distributed training example.
+"""Distributed training execution example script.
 
-Single-process CPU run:
-    python examples/train_ddp.py
+Demonstrates DistributedDataParallel (DDP) initialization and training loop execution.
 
-Multi-process CPU run:
-    torchrun --standalone --nproc_per_node=2 examples/train_ddp.py
+Execution options:
+    Single-process CPU run:
+        python examples/train_ddp.py
+
+    Multi-process CPU run:
+        torchrun --standalone --nproc_per_node=2 examples/train_ddp.py
 """
+
+from __future__ import annotations
 
 import torch
 from torch import nn
@@ -15,7 +20,8 @@ from stackformer.distributed import cleanup_distributed
 from stackformer.engine import Trainer
 
 
-def main():
+def main() -> None:
+    """Run distributed training example."""
     inputs = torch.randint(0, 8, (32, 4))
     targets = torch.randint(0, 8, (32, 4))
     loader = DataLoader(TensorDataset(inputs, targets), batch_size=8)
@@ -38,3 +44,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

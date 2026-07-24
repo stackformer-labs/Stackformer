@@ -42,9 +42,23 @@ from stackformer.utils.attn_utils import _run_sdpa, _get_attention_mask
 
 _ROPE_FREQ_CACHE: dict[tuple[int, int, str, torch.dtype, float], torch.Tensor] = {}
 
-def _build_rope_frequency(head_dim: int, seq_len: int, device, dtype, theta: float = 10000.0) -> torch.Tensor:
+
+def _build_rope_frequency(
+    head_dim: int, seq_len: int, device: torch.device | str, dtype: torch.dtype, theta: float = 10000.0
+) -> torch.Tensor:
+    """Precompute complex rotary positional frequency spectrum for RoPE.
+
+    Args:
+        head_dim (int): Dimension per attention head (must be even).
+        seq_len (int): Maximum sequence length to compute frequencies for.
+        device (torch.device | str): Target compute device.
+        dtype (torch.dtype): Target data type.
+        theta (float, default=10000.0): RoPE base frequency multiplier.
+
+    Returns:
+        torch.Tensor: Complex frequency tensor of shape ``(seq_len, head_dim // 2)``.
+    """
     assert head_dim % 2 == 0, "head_dim must be even for RoPE"
-    # theta is included in the key so different base frequencies don't alias
     key = (head_dim, seq_len, str(device), dtype, theta)
     if key in _ROPE_FREQ_CACHE:
         return _ROPE_FREQ_CACHE[key]
@@ -57,7 +71,17 @@ def _build_rope_frequency(head_dim: int, seq_len: int, device, dtype, theta: flo
     _ROPE_FREQ_CACHE[key] = freq_complex
     return freq_complex
 
-def _apply_rotary_position_embedding(x: torch.Tensor, freq_complex: torch.Tensor):
+
+def _apply_rotary_position_embedding(x: torch.Tensor, freq_complex: torch.Tensor) -> torch.Tensor:
+    """Apply Rotary Position Embeddings (RoPE) via complex multiplication.
+
+    Args:
+        x (torch.Tensor): Attention Q or K tensor of shape ``(B, H, T, D)``.
+        freq_complex (torch.Tensor): Complex frequency tensor slice of shape ``(T, D // 2)``.
+
+    Returns:
+        torch.Tensor: Position-encoded Q or K tensor of shape ``(B, H, T, D)``.
+    """
     B, H, T, D = x.shape
     assert D % 2 == 0, "head_dim must be even for RoPE"
 
@@ -70,6 +94,7 @@ def _apply_rotary_position_embedding(x: torch.Tensor, freq_complex: torch.Tensor
     x_out = torch.view_as_real(x_rot).view(B, H, T, D)
     return x_out.to(dtype=x.dtype, device=x.device)
 
+
 class Self_Attention(nn.Module):
     """Single-head causal/self attention.
 
@@ -79,45 +104,48 @@ class Self_Attention(nn.Module):
         - Y = A V W_o
 
     Constructor args:
-        embed_dim (int, required): Input/hidden size ``C``.
-        dropout (float, optional, default=0.0): Dropout probability on attention probabilities after softmax.
-        qkv_bias (bool, optional, default=False): Enables bias terms in Q/K/V projection layers.
-        device (str or torch.device, optional, default='cpu'): Parameter and compute device.
-        dtype (torch.dtype, optional, default=torch.float32): Parameter and compute dtype.
-        mask_type ([str], optional, default=['causal']): 'causal' or 'sliding_window'.
+        embed_dim (int): Input/hidden size ``C``.
+        dropout (float, default=0.0): Dropout probability on attention probabilities after softmax.
+        mask_type (list[str] | None, default=None): Masking type ('causal', 'sliding_window').
+        qkv_bias (bool, default=False): Enables bias terms in Q/K/V projection layers.
+        device (torch.device | str, default='cpu'): Parameter and compute device.
+        dtype (torch.dtype, default=torch.float32): Parameter and compute dtype.
 
     Forward args:
-        x (torch.Tensor, required): Shape ``(B, T, C)``.
-        mask (bool, optional, default=True): If True, applies autoregressive
-            causal masking (token i cannot attend to tokens > i).
+        x (torch.Tensor): Input sequence tensor of shape ``(B, T, C)``.
+        mask (bool, default=True): Apply causal masking.
 
     Returns:
-        torch.Tensor: Shape ``(B, T, C)``.
+        torch.Tensor: Output tensor of shape ``(B, T, C)``.
 
     Example:
         >>> layer = Self_Attention(embed_dim=64, dropout=0.0)
         >>> x = torch.randn(4, 32, 64)
         >>> y = layer(x, mask=True)
     """
-    def __init__(self, embed_dim, dropout=0.0, mask_type=None, qkv_bias=False,device='cpu', dtype=torch.float32, **mask_kwargs):
+
+    def __init__(
+        self,
+        embed_dim: int,
+        dropout: float = 0.0,
+        mask_type: list[str] | None = None,
+        qkv_bias: bool = False,
+        device: torch.device | str = "cpu",
+        dtype: torch.dtype = torch.float32,
+        **mask_kwargs,
+    ) -> None:
         super().__init__()
         self.embed_dim = embed_dim
         self.device = device
         self.dtype = dtype
         self.mask_type = mask_type
         self.mask_kwargs = mask_kwargs
-        
-        # Linear layer
-        self.qkv_proj = nn.Linear(embed_dim, embed_dim*3, bias=qkv_bias, device=device, dtype=dtype)
-        
-        # Output projection layer to map attention output back to input dimension
+
+        self.qkv_proj = nn.Linear(embed_dim, embed_dim * 3, bias=qkv_bias, device=device, dtype=dtype)
         self.out_proj = nn.Linear(embed_dim, embed_dim, device=device, dtype=dtype)
-
-        # Dropout applied to the attention weights
         self.dropout_p = dropout
-
-        # Cache for causal masks to avoid recomputation across forward passes
         self._causal_mask_cache = {}
+
 
     def _get_or_create_mask(self, seq_len: int, device):
         return _get_attention_mask(
@@ -941,18 +969,24 @@ class kv_cache_multihead(nn.Module):
         # Read full cached KV
         k_full = self.cache_keys[:B, :, :end_pos]
         v_full = self.cache_values[:B, :, :end_pos]
+
+        # RATIONALE (Gradient Flow & Autograd Safety):
+        # During training (or when gradients are enabled), writing in-place to pre-allocated buffers
+        # creates dependencies across time steps that would corrupt PyTorch's autograd graph.
+        # To ensure correct backpropagation through current-step keys/values while reusing
+        # memory, we detach and clone the historical prefix tokens (0 to start_pos), then splice in
+        # the live autograd computation nodes for the current chunk (start_pos to end_pos).
         if torch.is_grad_enabled():
-            # Detach the prefix positions (already committed in prior steps);
-            # only the current chunk participates in the gradient graph.
             k_full = k_full.detach().clone()
             v_full = v_full.detach().clone()
             k_full[:, :, start_pos:end_pos] = _k_to_store
             v_full[:, :, start_pos:end_pos] = _v_to_store
-        
-        # Rectangular causal mask (T,S)
+
+        # Rectangular causal mask (T, S)
         attn_mask = None
         if mask:
             attn_mask = self._get_or_create_kv_mask(T, end_pos, start_pos, device=x.device)
+
 
         # Scaled Dot Product Attention (Flash / MemEff)        
         context = F.scaled_dot_product_attention(
@@ -1079,6 +1113,13 @@ class kv_cache_group_query(nn.Module):
         # Read full KV
         k_full = self.cache_keys[:B, :, :end_pos]
         v_full = self.cache_values[:B, :, :end_pos]
+
+        # RATIONALE (Gradient Flow & Autograd Safety):
+        # During training (or when gradients are enabled), writing in-place to pre-allocated buffers
+        # creates dependencies across time steps that would corrupt PyTorch's autograd graph.
+        # To ensure correct backpropagation through current-step keys/values while reusing
+        # memory, we detach and clone the historical prefix tokens (0 to start_pos), then splice in
+        # the live autograd computation nodes for the current chunk (start_pos to end_pos).
         if torch.is_grad_enabled():
             k_full = k_full.detach().clone()
             k_full[:, :, start_pos:end_pos] = _k_to_store
@@ -1089,6 +1130,7 @@ class kv_cache_group_query(nn.Module):
         # Expand KV heads to match Q heads (GQA)
         k_full = k_full.repeat_interleave(self.num_queries_per_kv, dim=1)
         v_full = v_full.repeat_interleave(self.num_queries_per_kv, dim=1)
+
 
         # Rectangular causal mask (T,S)
         attn_mask = None
