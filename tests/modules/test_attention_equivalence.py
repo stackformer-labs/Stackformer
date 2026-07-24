@@ -13,14 +13,12 @@ def test_self_attention_equivalent_to_single_head_mha_when_weights_are_shared(to
 
     _checkpoint("Copying projection weights from SA to MHA")
     with torch.no_grad():
-        mha.q_proj.weight.copy_(sa.q_proj.weight)
-        mha.k_proj.weight.copy_(sa.k_proj.weight)
-        mha.v_proj.weight.copy_(sa.v_proj.weight)
-        if mha.q_proj.bias is not None and sa.q_proj.bias is not None:
-            mha.q_proj.bias.copy_(sa.q_proj.bias)
-            mha.k_proj.bias.copy_(sa.k_proj.bias)
-            mha.v_proj.bias.copy_(sa.v_proj.bias)
+        # Both classes use a single fused qkv_proj (embed_dim -> 3*embed_dim),
+        # so weights can be copied directly with no splitting/reshaping needed.
+        mha.qkv_proj.weight.copy_(sa.qkv_proj.weight)
         mha.out_proj.weight.copy_(sa.out_proj.weight)
+        if mha.qkv_proj.bias is not None and sa.qkv_proj.bias is not None:
+            mha.qkv_proj.bias.copy_(sa.qkv_proj.bias)
         if mha.out_proj.bias is not None and sa.out_proj.bias is not None:
             mha.out_proj.bias.copy_(sa.out_proj.bias)
 

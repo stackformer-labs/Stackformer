@@ -108,9 +108,7 @@ class Self_Attention(nn.Module):
         self.mask_kwargs = mask_kwargs
         
         # Linear layer
-        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
-        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
-        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
+        self.qkv_proj = nn.Linear(embed_dim, embed_dim*3, bias=qkv_bias, device=device, dtype=dtype)
         
         # Output projection layer to map attention output back to input dimension
         self.out_proj = nn.Linear(embed_dim, embed_dim, device=device, dtype=dtype)
@@ -134,9 +132,8 @@ class Self_Attention(nn.Module):
         B, T, C = x.shape
         
         # Project Q, K, V
-        q = self.q_proj(x)
-        k = self.k_proj(x)
-        v = self.v_proj(x)
+        qkv = self.qkv_proj(x)                      # (B, T, 3*C)
+        q, k, v = qkv.split(self.embed_dim, dim=-1)    # each (B, T, C)
 
         # Add single head dimension for SDPA
         q = q.unsqueeze(1)  # (B, 1, T, C)
@@ -201,9 +198,7 @@ class Multi_Head_Attention(nn.Module):
         self.mask_kwargs = mask_kwargs
 
         # Linear layer
-        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
-        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
-        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
+        self.qkv_proj = nn.Linear(embed_dim, embed_dim*3, bias=qkv_bias, device=device, dtype=self.dtype)
         
         # Final output projection after attention
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
@@ -226,11 +221,9 @@ class Multi_Head_Attention(nn.Module):
     def forward(self, x, mask=True):
         B, T, C = x.shape
         
-        q = self.q_proj(x)  # (B, T, C)
-        k = self.k_proj(x) 
-        v = self.v_proj(x) 
+        qkv = self.qkv_proj(x)                      # (B, T, 3*C)
+        q, k, v = qkv.split(self.embed_dim, dim=-1)    # each (B, T, C)
         
-
         # Reshape for multi-head attention:
         # (B, T, C) → (B, T, num_heads, head_dim) → (B, num_heads, T, head_dim)
         q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
@@ -291,9 +284,7 @@ class Multi_Head_Attention_With_RoPE(nn.Module):
         self.mask_kwargs = mask_kwargs
 
         # Linear layer
-        self.q_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
-        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
-        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
+        self.qkv_proj = nn.Linear(embed_dim, embed_dim * 3, bias=qkv_bias, device=device, dtype=self.dtype)
         
         # Final output projection after attention
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
@@ -319,10 +310,9 @@ class Multi_Head_Attention_With_RoPE(nn.Module):
     def forward(self, x, mask=True, theta: float=10000.0):
         B, T, C = x.shape
 
-        q = self.q_proj(x)  # (B, T, C)
-        k = self.k_proj(x) 
-        v = self.v_proj(x) 
-        
+        qkv = self.qkv_proj(x)  # (B, T, 3*C)
+        q, k, v = qkv.split(self.embed_dim, dim=-1)  # each (B, T, C)
+
         # Reshape for multi-head attention:
         # (B, T, C) → (B, T, num_heads, head_dim) → (B, num_heads, T, head_dim)
         q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
@@ -384,8 +374,7 @@ class Cross_MultiHead_Attention(nn.Module):
 
         # Linear layer
         self.q_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
-        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
-        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
+        self.kv_proj = nn.Linear(embed_dim, embed_dim * 2, bias=qkv_bias, device=device, dtype=dtype)
 
         # Final output projection
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
@@ -407,15 +396,13 @@ class Cross_MultiHead_Attention(nn.Module):
 
     def forward(self, x, context, mask=False, attn_mask: torch.Tensor | None = None):
         B, T, C = x.shape
-        S = context.size(1)  # Length of context sequence
-
-        # Move inputs to the correct device and dtype
+        S = context.size(1)  # (B, S, C)
 
         # Compute Q from x, and K/V from context
         q = self.q_proj(x)  # (B, T, C)
-        k = self.k_proj(context)
-        v = self.v_proj(context)
-        
+        kv = self.kv_proj(context)
+        k, v = kv.split(self.embed_dim, dim=-1)  # each (B, S, C)
+
         # Reshape to multi-head format
         q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)  # (B, num_heads, T, head_dim)
         k = k.view(B, S, self.num_heads, self.head_dim).transpose(1, 2)  # (B, num_heads, S, head_dim)
@@ -477,8 +464,7 @@ class Multi_query_Attention(nn.Module):
 
         # Projection layers
         self.q_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
-        self.k_proj = nn.Linear(embed_dim, self.head_dim, bias=qkv_bias, device=device, dtype=self.dtype)
-        self.v_proj = nn.Linear(embed_dim, self.head_dim, bias=qkv_bias, device=device, dtype=self.dtype)
+        self.kv_proj = nn.Linear(embed_dim, self.head_dim * 2, bias=qkv_bias, device=device, dtype=self.dtype)
         
         # Output final projection
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
@@ -503,8 +489,8 @@ class Multi_query_Attention(nn.Module):
 
         # Project
         q = self.q_proj(x)                    # (B, T, C)
-        k = self.k_proj(x)                    # (B, T, D)
-        v = self.v_proj(x)                    # (B, T, D)
+        kv = self.kv_proj(x)                  # (B, T, 2*D)
+        k, v = kv.split(self.head_dim, dim=-1) # (B, T, D) each
 
         # Multi-head queries
         q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2) # (B, H, T, D)
@@ -569,8 +555,7 @@ class Multi_query_Attention_With_RoPE(nn.Module):
 
         # Projection layers
         self.q_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
-        self.k_proj = nn.Linear(embed_dim, self.head_dim, bias=qkv_bias, device=device, dtype=self.dtype)
-        self.v_proj = nn.Linear(embed_dim, self.head_dim, bias=qkv_bias, device=device, dtype=self.dtype)
+        self.kv_proj = nn.Linear(embed_dim, self.head_dim * 2, bias=qkv_bias, device=device, dtype=self.dtype)
         
         # Output final projection
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=self.dtype)
@@ -598,8 +583,8 @@ class Multi_query_Attention_With_RoPE(nn.Module):
 
         # Project
         q = self.q_proj(x)                    # (B, T, C)
-        k = self.k_proj(x)                    # (B, T, D)
-        v = self.v_proj(x)                    # (B, T, D)
+        kv = self.kv_proj(x)                  # (B, T, 2*D)
+        k, v = kv.split(self.head_dim, dim=-1)  # each (B, T, D)
 
         # Reshape
         q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)  # (B, H, T, D)
@@ -682,9 +667,9 @@ class Group_query_Attention(nn.Module):
 
         # Projection layers
         self.q_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
-        self.k_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim, bias=qkv_bias, device=device, dtype=dtype)
-        self.v_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim, bias=qkv_bias, device=device, dtype=dtype)
+        self.kv_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim * 2, bias=qkv_bias, device=device, dtype=dtype)
         
+        # Output final projection
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
         
         # Dropout applied to the attention weights
@@ -706,9 +691,10 @@ class Group_query_Attention(nn.Module):
 
         # Project Q, K, V
         q = self.q_proj(x)  # (B, T, C)
-        k = self.k_proj(x) 
-        v = self.v_proj(x) 
-
+        kv = self.kv_proj(x)  # (B, T, 2 * num_kv_heads * head_dim)
+        kv_dim = self.num_kv_heads * self.head_dim
+        k, v = kv.split(kv_dim, dim=-1)
+        
         # Reshape projections
         q = q.view(B, T, self.num_query_heads, self.head_dim).transpose(1, 2)  # (B, num_query_heads, T, head_dim)
         k = k.view(B, T, self.num_kv_heads, self.head_dim).transpose(1, 2)     # (B, num_kv_heads, T, head_dim)
@@ -773,9 +759,9 @@ class Group_query_Attention_With_RoPE(nn.Module):
 
         # Projection layers
         self.q_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
-        self.k_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim, bias=qkv_bias, device=device, dtype=dtype)
-        self.v_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim, bias=qkv_bias, device=device, dtype=dtype)
+        self.kv_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim * 2, bias=qkv_bias, device=device, dtype=dtype)
         
+        # Output final projection
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
         
         # Dropout applied to the attention weights
@@ -800,9 +786,10 @@ class Group_query_Attention_With_RoPE(nn.Module):
 
         # Project Q, K, V
         q = self.q_proj(x)  # (B, T, C)
-        k = self.k_proj(x) 
-        v = self.v_proj(x) 
-
+        kv = self.kv_proj(x)  # (B, T, 2 * num_kv_heads * head_dim)
+        kv_dim = self.num_kv_heads * self.head_dim
+        k, v = kv.split(kv_dim, dim=-1)
+        
         # Reshape projections
         q = q.view(B, T, self.num_query_heads, self.head_dim).transpose(1, 2)  # (B, num_query_heads, T, head_dim)
         k = k.view(B, T, self.num_kv_heads, self.head_dim).transpose(1, 2)     # (B, num_kv_heads, T, head_dim)
@@ -868,8 +855,7 @@ class kv_cache_multihead(nn.Module):
         
         #  QKV projection
         self.q_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
-        self.k_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
-        self.v_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
+        self.kv_proj = nn.Linear(embed_dim, embed_dim * 2, bias=qkv_bias, device=device, dtype=dtype)
         
         # Final output projection
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
@@ -921,8 +907,8 @@ class kv_cache_multihead(nn.Module):
 
         # Project Q, K, V
         q = self.q_proj(x)  # (B, T, C)
-        k = self.k_proj(x)
-        v = self.v_proj(x)
+        kv = self.kv_proj(x)  # (B, T, 2 * C)
+        k, v = kv.chunk(2, dim=-1)
 
         # Reshape to multi-head
         q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2) # (B, H, T, D)
@@ -941,6 +927,13 @@ class kv_cache_multihead(nn.Module):
         # during training (torch.is_grad_enabled() is False inside torch.no_grad())
         _k_to_store = k.detach() if not torch.is_grad_enabled() else k
         _v_to_store = v.detach() if not torch.is_grad_enabled() else v
+
+        # Guard against silent dtype mismatch under autocast/mixed precision
+        assert _k_to_store.dtype == self.cache_keys.dtype, (
+            f"KV cache dtype mismatch: got {_k_to_store.dtype}, "
+            f"cache is {self.cache_keys.dtype}. Cast inputs or recreate the cache "
+            f"with the desired dtype."
+        )
 
         self.cache_keys[:B, :, start_pos:end_pos] = _k_to_store
         self.cache_values[:B, :, start_pos:end_pos] = _v_to_store
@@ -1015,9 +1008,9 @@ class kv_cache_group_query(nn.Module):
 
         # Linear projections: Q from full dim, KV from reduced dim
         self.q_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
-        self.k_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim, bias=qkv_bias, device=device, dtype=dtype)
-        self.v_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim, bias=qkv_bias, device=device, dtype=dtype)
+        self.kv_proj = nn.Linear(embed_dim, num_kv_heads * self.head_dim * 2, bias=qkv_bias, device=device, dtype=dtype)
         
+        # Output final projection        
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=qkv_bias, device=device, dtype=dtype)
         
         # Dropout applied to the attention weights
@@ -1063,8 +1056,8 @@ class kv_cache_group_query(nn.Module):
 
         # Project Q, K, V
         q = self.q_proj(x)
-        k = self.k_proj(x)
-        v = self.v_proj(x)
+        kv = self.kv_proj(x)
+        k, v = kv.chunk(2, dim=-1)  # each (B, T, num_kv_heads * head_dim)
         # Reshape
         # Q: (B, T, QH, D)  K/V: (B, T, KVH, D)
         q = q.view(B, T, self.num_query_heads, self.head_dim).transpose(1, 2)
