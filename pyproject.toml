@@ -4,7 +4,8 @@ version = "0.1.10"
 description = "Modular transformer blocks built in PyTorch"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE*", "THIRD_PARTY_NOTICES.md", "licenses/*"]
 
 authors = [
   { name = "Stackformer Labs", email = "stackformer.dev@gmail.com" }
@@ -13,12 +14,9 @@ authors = [
 keywords = ["transformer", "pytorch", "deep-learning", "attention", "llm", "machine-learning"]
 
 dependencies = [
-  "torch>=2.3,<3.0",
-  "numpy>=1.23,<3.0",
-  "tqdm>=4.5,<5.0",
-  "tensorboard>=2.14,<3.0",
-  "wandb>=0.17,<1.0",
-  "safetensors>=0.4,<1.0"
+  "torch>=2.5,<3.0",
+  "numpy>=1.24,<3.0",
+  "safetensors>=0.4.0",
 ]
 
 classifiers = [
@@ -33,10 +31,43 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+train = [
+  "tqdm>=4.65.0",
+  "rich>=12.0",
+]
+tensorboard = [
+  "tensorboard>=2.14",
+]
+wandb = [
+  "wandb>=0.17",
+]
+float8 = [
+  "torchao>=0.6.0",
+]
 dev = [
   "pytest>=8.0,<9.0",
   "pytest-cov>=5.0,<6.0",
-  "build>=1.2,<2.0"
+  "build>=1.2,<2.0",
+  "twine>=5.0,<6.0",
+  "ruff==0.11.2",
+  "pyright>=1.1.350",
+  "bandit>=1.7.0",
+  "vulture>=2.10",
+]
+all = [
+  "tqdm>=4.65.0",
+  "rich>=12.0",
+  "tensorboard>=2.14",
+  "wandb>=0.17",
+  "torchao>=0.6.0",
+  "pytest>=8.0,<9.0",
+  "pytest-cov>=5.0,<6.0",
+  "build>=1.2,<2.0",
+  "twine>=5.0,<6.0",
+  "ruff==0.11.2",
+  "pyright>=1.1.350",
+  "bandit>=1.7.0",
+  "vulture>=2.10",
 ]
 
 [project.urls]
@@ -47,6 +78,7 @@ Discussions = "https://github.com/stackformer-labs/Stackformer/discussions"
 Documentation = "https://github.com/stackformer-labs/Stackformer/tree/main/docs"
 
 [tool.setuptools.packages.find]
+where = ["src"]
 include = ["stackformer*"]
 exclude = ["assets*"]
 
@@ -64,3 +96,43 @@ pythonpath = ["."]
 markers = [
   "gpu: tests that require CUDA-capable GPU hardware",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "C4", "RUF"]
+ignore = [
+  "E501",  # line length handled by formatter
+  "RUF043",  # pytest.raises match pattern metacharacters
+]
+
+[tool.ruff.lint.per-file-ignores]
+# __init__.py re-exports public API symbols and uses order-dependent aliases
+"__init__.py" = ["F401", "E402", "RUF022"]
+# test files use fixtures, local imports, and assert-driven structures
+"tests/*" = ["F401", "F841", "B011", "SIM117"]
+"tests/**" = ["F401", "F841", "B011", "SIM117"]
+# quantization utils contains specialized fsdp hooks
+"src/stackformer/quantization/utils.py" = ["F821"]
+# base logger provides optional default no-op hooks for subclasses
+"src/stackformer/training/loggers/base.py" = ["B027"]
+# file logger maintains persistent open file handles across training loop steps
+"src/stackformer/training/loggers/file.py" = ["SIM115"]
+# attn utils has conditional fallback imports
+"src/stackformer/utils/attn_utils.py" = ["F401"]
+
+[tool.pyright]
+typeCheckingMode = "basic"
+include = [
+  "src/stackformer/training",
+  "src/stackformer/distributed",
+]
+exclude = [
+  "**/__pycache__",
+]
+reportPrivateImportUsage = false
+reportAttributeAccessIssue = false
+reportOptionalMemberAccess = false
+reportAssignmentType = false

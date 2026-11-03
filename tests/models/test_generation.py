@@ -1,24 +1,37 @@
 import pytest
 import torch
 import torch.nn as nn
-from tests._test_utils import _checkpoint
 
 from stackformer import GPT_1, GPT_2, gemma_1_2b, llama_1
 from stackformer.generate import text_generate
+from tests._test_utils import _checkpoint
 
 
 @pytest.mark.parametrize("model_cls", [GPT_1, GPT_2, gemma_1_2b, llama_1])
 def test_generation_shape_and_stability_single_and_batch(model_cls, torch_device):
-    _checkpoint("test_generation_shape_and_stability setup", model=model_cls.__name__, device=torch_device)
+    _checkpoint(
+        "test_generation_shape_and_stability setup", model=model_cls.__name__, device=torch_device
+    )
     torch.manual_seed(0)
     x = torch.randint(0, 32, (2, 6), device=torch_device)
-    model = model_cls(vocab_size=32, num_layers=1, embed_dim=8, num_heads=2, seq_len=6, dropout=0.0, hidden_dim=16, device=torch_device)
+    model = model_cls(
+        vocab_size=32,
+        num_layers=1,
+        embed_dim=8,
+        num_heads=2,
+        seq_len=6,
+        dropout=0.0,
+        hidden_dim=16,
+        device=torch_device,
+    )
 
     _checkpoint("Running single and batch generation")
     single = model.generate(x[0], max_context_len=6, max_new_tokens=3)
     batch = model.generate(x, max_context_len=6, max_new_tokens=2)
 
-    _checkpoint("Asserting output shapes and finiteness", single_shape=single.shape, batch_shape=batch.shape)
+    _checkpoint(
+        "Asserting output shapes and finiteness", single_shape=single.shape, batch_shape=batch.shape
+    )
     assert single.shape == (1, 9)
     assert batch.shape == (2, 8)
     assert torch.isfinite(single.float()).all() and torch.isfinite(batch.float()).all()
@@ -26,9 +39,22 @@ def test_generation_shape_and_stability_single_and_batch(model_cls, torch_device
 
 @pytest.mark.parametrize("model_cls", [GPT_1, GPT_2])
 def test_generation_is_deterministic_with_seed_reset(model_cls, torch_device):
-    _checkpoint("test_generation_is_deterministic_with_seed_reset setup", model=model_cls.__name__, device=torch_device)
+    _checkpoint(
+        "test_generation_is_deterministic_with_seed_reset setup",
+        model=model_cls.__name__,
+        device=torch_device,
+    )
     x = torch.randint(0, 32, (1, 6), device=torch_device)
-    model = model_cls(vocab_size=32, num_layers=1, embed_dim=8, num_heads=2, seq_len=6, dropout=0.0, hidden_dim=16, device=torch_device)
+    model = model_cls(
+        vocab_size=32,
+        num_layers=1,
+        embed_dim=8,
+        num_heads=2,
+        seq_len=6,
+        dropout=0.0,
+        hidden_dim=16,
+        device=torch_device,
+    )
 
     torch.manual_seed(0)
     out1 = model.generate(x, max_context_len=6, max_new_tokens=3)
