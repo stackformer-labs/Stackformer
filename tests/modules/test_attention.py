@@ -1,8 +1,8 @@
 import pytest
 import torch
-from tests._test_utils import _checkpoint
 
-from stackformer.modules.Attention import (
+from stackformer.modules.attention import (
+    _ROPE_FREQ_CACHE,
     Cross_MultiHead_Attention,
     Group_query_Attention,
     Group_query_Attention_With_RoPE,
@@ -13,22 +13,26 @@ from stackformer.modules.Attention import (
     Self_Attention,
     kv_cache_group_query,
     kv_cache_multihead,
-    _ROPE_FREQ_CACHE,
 )
 from stackformer.modules.attention_engine import _run_attention, _run_flex_attention, _run_sdpa
+from tests._test_utils import _checkpoint
 
 BATCH, SEQ, EMB = 2, 6, 8
 HEADS, KV_HEADS = 2, 1
 MASKS = [
-    dict(mask_type=["causal"]),
-    dict(mask_type=["sliding_window"], window_size=2),
-    dict(mask_type=["sliding_window", "global_mask"], window_size=2, global_index=[1]),
-    dict(mask_type=["no"]),
+    {"mask_type": ["causal"]},
+    {"mask_type": ["sliding_window"], "window_size": 2},
+    {"mask_type": ["sliding_window", "global_mask"], "window_size": 2, "global_index": [1]},
+    {"mask_type": ["no"]},
 ]
 
 
 def _assert_finite_and_grad(out: torch.Tensor, x: torch.Tensor) -> None:
-    _checkpoint("_assert_finite_and_grad checking shapes and finite values", out_shape=out.shape, x_shape=x.shape)
+    _checkpoint(
+        "_assert_finite_and_grad checking shapes and finite values",
+        out_shape=out.shape,
+        x_shape=x.shape,
+    )
     assert out.shape == x.shape
     assert torch.isfinite(out).all()
     assert torch.abs(out).mean() < 100
@@ -45,10 +49,18 @@ def _assert_finite_and_grad(out: torch.Tensor, x: torch.Tensor) -> None:
     "attn_ctor",
     [
         lambda kw, dev: Self_Attention(EMB, dropout=0.0, device=dev, **kw),
-        lambda kw, dev: Multi_Head_Attention(embed_dim=EMB, num_heads=HEADS, dropout=0.0, device=dev, **kw),
-        lambda kw, dev: Multi_Head_Attention_With_RoPE(embed_dim=EMB, num_heads=HEADS, dropout=0.0, device=dev, **kw),
-        lambda kw, dev: Multi_query_Attention(embed_dim=EMB, num_heads=HEADS, dropout=0.0, device=dev, **kw),
-        lambda kw, dev: Multi_query_Attention_With_RoPE(embed_dim=EMB, num_heads=HEADS, dropout=0.0, device=dev, **kw),
+        lambda kw, dev: Multi_Head_Attention(
+            embed_dim=EMB, num_heads=HEADS, dropout=0.0, device=dev, **kw
+        ),
+        lambda kw, dev: Multi_Head_Attention_With_RoPE(
+            embed_dim=EMB, num_heads=HEADS, dropout=0.0, device=dev, **kw
+        ),
+        lambda kw, dev: Multi_query_Attention(
+            embed_dim=EMB, num_heads=HEADS, dropout=0.0, device=dev, **kw
+        ),
+        lambda kw, dev: Multi_query_Attention_With_RoPE(
+            embed_dim=EMB, num_heads=HEADS, dropout=0.0, device=dev, **kw
+        ),
         lambda kw, dev: Group_query_Attention(
             embed_dim=EMB,
             num_query_heads=HEADS,
@@ -68,7 +80,9 @@ def _assert_finite_and_grad(out: torch.Tensor, x: torch.Tensor) -> None:
     ],
 )
 def test_attention_variants_masks_and_gradients(mask_kw, attn_ctor, torch_device):
-    _checkpoint("test_attention_variants_masks_and_gradients setup", mask_kw=mask_kw, device=torch_device)
+    _checkpoint(
+        "test_attention_variants_masks_and_gradients setup", mask_kw=mask_kw, device=torch_device
+    )
     x = torch.randn(BATCH, SEQ, EMB, requires_grad=True, device=torch_device)
     layer = attn_ctor(mask_kw, torch_device)
     _checkpoint("Executing forward pass on attention variant", layer_class=layer.__class__.__name__)
@@ -80,7 +94,9 @@ def test_cross_attention_shape_and_gradients(torch_device):
     _checkpoint("test_cross_attention_shape_and_gradients setup", device=torch_device)
     q = torch.randn(BATCH, SEQ, EMB, requires_grad=True, device=torch_device)
     ctx = torch.randn(BATCH, SEQ, EMB, device=torch_device)
-    layer = Cross_MultiHead_Attention(embed_dim=EMB, num_heads=HEADS, dropout=0.0, mask_type=["causal"], device=torch_device)
+    layer = Cross_MultiHead_Attention(
+        embed_dim=EMB, num_heads=HEADS, dropout=0.0, mask_type=["causal"], device=torch_device
+    )
 
     _checkpoint("Executing Cross_MultiHead_Attention forward pass")
     out = layer(q, context=ctx)
@@ -89,8 +105,17 @@ def test_cross_attention_shape_and_gradients(torch_device):
 
 @pytest.mark.parametrize("batch", [1, 2])
 def test_kv_cache_multihead_multiple_decode_steps(batch, torch_device):
-    _checkpoint("test_kv_cache_multihead_multiple_decode_steps setup", batch=batch, device=torch_device)
-    cache = kv_cache_multihead(embed_dim=EMB, num_heads=HEADS, batch_size=2, kv_seq_len=SEQ, dropout=0.0, device=torch_device)
+    _checkpoint(
+        "test_kv_cache_multihead_multiple_decode_steps setup", batch=batch, device=torch_device
+    )
+    cache = kv_cache_multihead(
+        embed_dim=EMB,
+        num_heads=HEADS,
+        batch_size=2,
+        kv_seq_len=SEQ,
+        dropout=0.0,
+        device=torch_device,
+    )
 
     x0 = torch.randn(batch, 2, EMB, device=torch_device)
     _checkpoint("KV cache step 0 forward", x0_shape=x0.shape)
@@ -137,9 +162,13 @@ def test_kv_cache_group_query_multiple_decode_steps(torch_device):
 @pytest.mark.parametrize(
     "ctor,args,error",
     [
-        (Multi_Head_Attention, dict(embed_dim=10, num_heads=3), AssertionError),
-        (Group_query_Attention, dict(embed_dim=8, num_query_heads=3, num_kv_heads=2), AssertionError),
-        (Self_Attention, dict(embed_dim=8, mask_type=["does_not_exist"]), ValueError),
+        (Multi_Head_Attention, {"embed_dim": 10, "num_heads": 3}, AssertionError),
+        (
+            Group_query_Attention,
+            {"embed_dim": 8, "num_query_heads": 3, "num_kv_heads": 2},
+            AssertionError,
+        ),
+        (Self_Attention, {"embed_dim": 8, "mask_type": ["does_not_exist"]}, ValueError),
     ],
 )
 def test_attention_invalid_configs_raise(ctor, args, error, torch_device):
@@ -152,7 +181,9 @@ def test_attention_invalid_configs_raise(ctor, args, error, torch_device):
 
 def test_cross_attention_mismatched_batch_raises(torch_device):
     _checkpoint("test_cross_attention_mismatched_batch_raises setup", device=torch_device)
-    layer = Cross_MultiHead_Attention(embed_dim=EMB, num_heads=HEADS, dropout=0.0, device=torch_device)
+    layer = Cross_MultiHead_Attention(
+        embed_dim=EMB, num_heads=HEADS, dropout=0.0, device=torch_device
+    )
     q = torch.randn(2, 4, EMB, device=torch_device)
     ctx = torch.randn(1, 4, EMB, device=torch_device)
     with pytest.raises(RuntimeError):
@@ -161,7 +192,9 @@ def test_cross_attention_mismatched_batch_raises(torch_device):
 
 def test_cross_attention_accepts_explicit_t_s_mask(torch_device):
     _checkpoint("test_cross_attention_accepts_explicit_t_s_mask setup", device=torch_device)
-    layer = Cross_MultiHead_Attention(embed_dim=EMB, num_heads=HEADS, dropout=0.0, device=torch_device)
+    layer = Cross_MultiHead_Attention(
+        embed_dim=EMB, num_heads=HEADS, dropout=0.0, device=torch_device
+    )
     q = torch.randn(BATCH, 4, EMB, requires_grad=True, device=torch_device)
     ctx = torch.randn(BATCH, 6, EMB, device=torch_device)
     mask = torch.zeros(4, 6, dtype=torch.bool, device=torch_device)
@@ -171,7 +204,9 @@ def test_cross_attention_accepts_explicit_t_s_mask(torch_device):
 
 def test_cross_attention_invalid_mask_shape_raises(torch_device):
     _checkpoint("test_cross_attention_invalid_mask_shape_raises setup", device=torch_device)
-    layer = Cross_MultiHead_Attention(embed_dim=EMB, num_heads=HEADS, dropout=0.0, device=torch_device)
+    layer = Cross_MultiHead_Attention(
+        embed_dim=EMB, num_heads=HEADS, dropout=0.0, device=torch_device
+    )
     q = torch.randn(BATCH, 4, EMB, device=torch_device)
     ctx = torch.randn(BATCH, 6, EMB, device=torch_device)
     bad_mask = torch.zeros(4, 4, dtype=torch.bool, device=torch_device)
@@ -180,7 +215,9 @@ def test_cross_attention_invalid_mask_shape_raises(torch_device):
 
 
 def test_attention_constructors_allow_positional_dropout_safely(torch_device):
-    _checkpoint("test_attention_constructors_allow_positional_dropout_safely setup", device=torch_device)
+    _checkpoint(
+        "test_attention_constructors_allow_positional_dropout_safely setup", device=torch_device
+    )
     x = torch.randn(1, 3, EMB, device=torch_device)
     layer = Multi_Head_Attention_With_RoPE(EMB, HEADS, 0.0, device=torch_device)
     out = layer(x)
@@ -189,12 +226,49 @@ def test_attention_constructors_allow_positional_dropout_safely(torch_device):
 
 def test_attention_rope_freq_cache_tracking(torch_device):
     """Cover M-01 issue monitoring module-level _ROPE_FREQ_CACHE."""
-    _checkpoint("test_attention_rope_freq_cache_tracking starting", initial_cache_len=len(_ROPE_FREQ_CACHE))
+    _checkpoint(
+        "test_attention_rope_freq_cache_tracking starting", initial_cache_len=len(_ROPE_FREQ_CACHE)
+    )
     layer = Multi_Head_Attention_With_RoPE(embed_dim=8, num_heads=2, device=torch_device)
     x = torch.randn(1, 4, 8, device=torch_device)
     out = layer(x)
     _checkpoint("Checking RoPE cache presence", cache_size=len(_ROPE_FREQ_CACHE))
     assert isinstance(_ROPE_FREQ_CACHE, dict)
+
+
+def test_rope_freq_cache_bounded(torch_device):
+    """Finding #42: _ROPE_FREQ_CACHE must be bounded (e.g. max 32 entries) under variable seq_len."""
+    from stackformer.modules.attention import _build_rope_frequency
+
+    _ROPE_FREQ_CACHE.clear()
+    for s in range(2, 80, 2):
+        _build_rope_frequency(head_dim=16, seq_len=s, device=torch_device, dtype=torch.float32)
+    assert len(_ROPE_FREQ_CACHE) <= 32
+
+
+def test_rope_frequency_slice_equals_built_for_t(torch_device):
+    """Finding #42: A slice [:T] of a longer precomputed table must equal one built directly for T."""
+    from stackformer.modules.attention import _build_rope_frequency
+
+    _ROPE_FREQ_CACHE.clear()
+    head_dim = 16
+    t_short = 24
+    t_long = 128
+
+    table_long = _build_rope_frequency(head_dim=head_dim, seq_len=t_long, device=torch_device)
+    table_short_slice = table_long[:t_short]
+
+    # Directly compute table for t_short (without cache)
+    _ROPE_FREQ_CACHE.clear()
+    table_short_direct = _build_rope_frequency(
+        head_dim=head_dim, seq_len=t_short, device=torch_device
+    )
+
+    assert table_short_slice.shape == (t_short, head_dim // 2)
+    assert table_short_direct.shape == (t_short, head_dim // 2)
+    assert torch.allclose(table_short_slice, table_short_direct), (
+        "Slice [:T] of longer RoPE table must equal table directly computed for T"
+    )
 
 
 def test_run_attention_dispatcher_defaults(torch_device):
@@ -221,15 +295,56 @@ def test_run_attention_invalid_backend_raises(torch_device):
     "ctor",
     [
         lambda dev, backend: Self_Attention(EMB, dropout=0.0, device=dev, backend=backend),
-        lambda dev, backend: Multi_Head_Attention(embed_dim=EMB, num_heads=HEADS, dropout=0.0, device=dev, backend=backend),
-        lambda dev, backend: Multi_Head_Attention_With_RoPE(embed_dim=EMB, num_heads=HEADS, dropout=0.0, device=dev, backend=backend),
-        lambda dev, backend: Cross_MultiHead_Attention(embed_dim=EMB, num_heads=HEADS, dropout=0.0, device=dev, backend=backend),
-        lambda dev, backend: Multi_query_Attention(embed_dim=EMB, num_heads=HEADS, dropout=0.0, device=dev, backend=backend),
-        lambda dev, backend: Multi_query_Attention_With_RoPE(embed_dim=EMB, num_heads=HEADS, dropout=0.0, device=dev, backend=backend),
-        lambda dev, backend: Group_query_Attention(embed_dim=EMB, num_query_heads=HEADS, num_kv_heads=KV_HEADS, dropout=0.0, device=dev, backend=backend),
-        lambda dev, backend: Group_query_Attention_With_RoPE(embed_dim=EMB, num_query_heads=HEADS, num_kv_heads=KV_HEADS, dropout=0.0, device=dev, backend=backend),
-        lambda dev, backend: kv_cache_multihead(embed_dim=EMB, num_heads=HEADS, batch_size=BATCH, kv_seq_len=SEQ, dropout=0.0, device=dev, backend=backend),
-        lambda dev, backend: kv_cache_group_query(embed_dim=EMB, num_query_heads=HEADS, num_kv_heads=KV_HEADS, batch_size=BATCH, kv_seq_len=SEQ, dropout=0.0, device=dev, backend=backend),
+        lambda dev, backend: Multi_Head_Attention(
+            embed_dim=EMB, num_heads=HEADS, dropout=0.0, device=dev, backend=backend
+        ),
+        lambda dev, backend: Multi_Head_Attention_With_RoPE(
+            embed_dim=EMB, num_heads=HEADS, dropout=0.0, device=dev, backend=backend
+        ),
+        lambda dev, backend: Cross_MultiHead_Attention(
+            embed_dim=EMB, num_heads=HEADS, dropout=0.0, device=dev, backend=backend
+        ),
+        lambda dev, backend: Multi_query_Attention(
+            embed_dim=EMB, num_heads=HEADS, dropout=0.0, device=dev, backend=backend
+        ),
+        lambda dev, backend: Multi_query_Attention_With_RoPE(
+            embed_dim=EMB, num_heads=HEADS, dropout=0.0, device=dev, backend=backend
+        ),
+        lambda dev, backend: Group_query_Attention(
+            embed_dim=EMB,
+            num_query_heads=HEADS,
+            num_kv_heads=KV_HEADS,
+            dropout=0.0,
+            device=dev,
+            backend=backend,
+        ),
+        lambda dev, backend: Group_query_Attention_With_RoPE(
+            embed_dim=EMB,
+            num_query_heads=HEADS,
+            num_kv_heads=KV_HEADS,
+            dropout=0.0,
+            device=dev,
+            backend=backend,
+        ),
+        lambda dev, backend: kv_cache_multihead(
+            embed_dim=EMB,
+            num_heads=HEADS,
+            batch_size=BATCH,
+            kv_seq_len=SEQ,
+            dropout=0.0,
+            device=dev,
+            backend=backend,
+        ),
+        lambda dev, backend: kv_cache_group_query(
+            embed_dim=EMB,
+            num_query_heads=HEADS,
+            num_kv_heads=KV_HEADS,
+            batch_size=BATCH,
+            kv_seq_len=SEQ,
+            dropout=0.0,
+            device=dev,
+            backend=backend,
+        ),
     ],
 )
 def test_attention_modules_backend_support(ctor, torch_device):
@@ -243,3 +358,41 @@ def test_attention_modules_backend_support(ctor, torch_device):
     with pytest.raises(ValueError):
         ctor(torch_device, "unsupported_backend")
 
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+def test_attention_numerical_equivalence_with_sdpa_fp32_bf16(dtype, torch_device):
+    """Finding #47: Multi_Head_Attention matches F.scaled_dot_product_attention with explicit mask in fp32 and bf16."""
+    import torch.nn.functional as F
+
+    torch.manual_seed(42)
+    B, T, H, D = 2, 4, 2, 8
+    embed_dim = H * D
+
+    mha = Multi_Head_Attention(
+        embed_dim=embed_dim,
+        num_heads=H,
+        dropout=0.0,
+        device=torch_device,
+        dtype=dtype,
+        mask_type=["no"],
+    )
+
+    x = torch.randn(B, T, embed_dim, device=torch_device, dtype=dtype)
+    # Boolean mask: mask out the last token
+    mask = torch.ones(B, 1, T, T, device=torch_device, dtype=torch.bool)
+    mask[:, :, :, -1] = False
+
+    actual = mha(x, mask=False, attn_mask=mask)
+
+    # Compute expected output using torch.nn.functional.scaled_dot_product_attention
+    qkv = mha.qkv_proj(x)
+    q, k, v = qkv.split(embed_dim, dim=-1)
+    q = q.view(B, T, H, D).transpose(1, 2)
+    k = k.view(B, T, H, D).transpose(1, 2)
+    v = v.view(B, T, H, D).transpose(1, 2)
+
+    expected_sdpa = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=0.0)
+    expected = mha.out_proj(expected_sdpa.transpose(1, 2).contiguous().view(B, T, embed_dim))
+
+    atol = 1e-4 if dtype == torch.float32 else 2e-2
+    assert torch.allclose(actual, expected, atol=atol), f"MHA must match SDPA reference for {dtype}"

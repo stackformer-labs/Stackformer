@@ -1,13 +1,22 @@
 import torch
-from tests._test_utils import _checkpoint
 
 from stackformer import GPT_1
+from tests._test_utils import _checkpoint
 
 
 def test_minimal_training_loop_runs_and_updates_weights(torch_device):
     _checkpoint("test_minimal_training_loop_runs_and_updates_weights setup", device=torch_device)
     torch.manual_seed(0)
-    model = GPT_1(vocab_size=32, num_layers=1, embed_dim=8, num_heads=2, seq_len=6, dropout=0.0, hidden_dim=16, device=torch_device)
+    model = GPT_1(
+        vocab_size=32,
+        num_layers=1,
+        embed_dim=8,
+        num_heads=2,
+        seq_len=6,
+        dropout=0.0,
+        hidden_dim=16,
+        device=torch_device,
+    )
     x = torch.randint(0, 32, (2, 6), device=torch_device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 

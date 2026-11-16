@@ -1,13 +1,15 @@
 import torch
-from tests._test_utils import _checkpoint
 
-from stackformer.modules.Attention import Multi_Head_Attention
-from stackformer.modules.Feed_forward import FF_GELU
+from stackformer.modules.attention import Multi_Head_Attention
+from stackformer.modules.feed_forward import FF_GELU
 from stackformer.modules.position_embedding import AbsolutePositionEmbedding
+from tests._test_utils import _checkpoint
 
 
 def test_embedding_position_attention_ff_pipeline_end_to_end(torch_device):
-    _checkpoint("test_embedding_position_attention_ff_pipeline_end_to_end setup", device=torch_device)
+    _checkpoint(
+        "test_embedding_position_attention_ff_pipeline_end_to_end setup", device=torch_device
+    )
     torch.manual_seed(0)
     tokens = torch.randint(0, 32, (2, 6), device=torch_device)
 
